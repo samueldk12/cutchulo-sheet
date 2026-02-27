@@ -1,6 +1,7 @@
 const initSqlJs = require('sql.js');
 const path = require('path');
 const fs = require('fs');
+const { randomUUID } = require('crypto');
 
 const DB_PATH = path.join(__dirname, 'cthulhu.db');
 let db = null;
@@ -63,6 +64,7 @@ function initSchema() {
   db.exec(`
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      uuid TEXT DEFAULT '',
       name TEXT NOT NULL DEFAULT 'Novo Investigador',
       player TEXT DEFAULT '',
       occupation TEXT DEFAULT '',
@@ -87,6 +89,9 @@ function initSchema() {
       san_max INTEGER DEFAULT 50,
       temporary_insanity INTEGER DEFAULT 0,
       indefinite_insanity INTEGER DEFAULT 0,
+      cash TEXT DEFAULT '',
+      assets TEXT DEFAULT '',
+      spending_level TEXT DEFAULT '',
       appearance_desc TEXT DEFAULT '',
       ideology TEXT DEFAULT '',
       significant_people TEXT DEFAULT '',
@@ -110,6 +115,9 @@ function initSchema() {
       value INTEGER DEFAULT 0,
       is_occupation INTEGER DEFAULT 0,
       is_interest INTEGER DEFAULT 0,
+      occ_points INTEGER DEFAULT 0,
+      int_points INTEGER DEFAULT 0,
+      game_points INTEGER DEFAULT 0,
       FOREIGN KEY(character_id) REFERENCES characters(id)
     );
 
@@ -157,8 +165,31 @@ function initSchema() {
     );
   `);
 
-  // Migrate: add image column if missing
-  try { db.run("ALTER TABLE characters ADD COLUMN image TEXT DEFAULT ''"); } catch(e) {}
+  // ─── Migrations (always safe to re-run) ──────────────────
+  const migrations = [
+    "ALTER TABLE characters ADD COLUMN image TEXT DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN uuid TEXT DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN cash TEXT DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN assets TEXT DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN spending_level TEXT DEFAULT ''",
+    "ALTER TABLE skills ADD COLUMN occ_points INTEGER DEFAULT 0",
+    "ALTER TABLE skills ADD COLUMN int_points INTEGER DEFAULT 0",
+    "ALTER TABLE skills ADD COLUMN game_points INTEGER DEFAULT 0",
+  ];
+  for (const m of migrations) { try { db.run(m); } catch(e) {} }
+
+  // Migrate existing skill data: populate occ_points/int_points from old is_occupation/is_interest flags
+  db.run(`UPDATE skills SET occ_points = MAX(0, value - base_value)
+    WHERE is_occupation = 1 AND occ_points = 0 AND int_points = 0 AND game_points = 0 AND value > base_value`);
+  db.run(`UPDATE skills SET int_points = MAX(0, value - base_value)
+    WHERE is_interest = 1 AND int_points = 0 AND occ_points = 0 AND game_points = 0 AND value > base_value`);
+
+  // Generate UUIDs for characters that don't have one
+  db.run(`UPDATE characters SET uuid = '' WHERE uuid IS NULL`);
+  const noUuid = query("SELECT id FROM characters WHERE uuid = '' OR uuid IS NULL");
+  for (const row of noUuid) {
+    db.run('UPDATE characters SET uuid = ? WHERE id = ?', [randomUUID(), row.id]);
+  }
 
   // Insert default config if not present
   for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
@@ -215,7 +246,18 @@ const DEFAULT_SKILLS = [
   { name: 'Psychoanalysis (Psicanálise)', base: 1 },
   { name: 'Read Lips (Leitura Labial)', base: 1 },
   { name: 'Ride (Equitação)', base: 5 },
-  { name: 'Science (Ciência)', base: 1 },
+  { name: 'Science (Biology) (Biologia)', base: 1 },
+  { name: 'Science (Botany) (Botânica)', base: 1 },
+  { name: 'Science (Chemistry) (Química)', base: 1 },
+  { name: 'Science (Cryptography) (Criptografia)', base: 1 },
+  { name: 'Science (Engineering) (Engenharia)', base: 1 },
+  { name: 'Science (Forensics) (Forense)', base: 1 },
+  { name: 'Science (Geology) (Geologia)', base: 1 },
+  { name: 'Science (Mathematics) (Matemática)', base: 1 },
+  { name: 'Science (Meteorology) (Meteorologia)', base: 1 },
+  { name: 'Science (Pharmacy) (Farmácia)', base: 1 },
+  { name: 'Science (Physics) (Física)', base: 1 },
+  { name: 'Science (Zoology) (Zoologia)', base: 1 },
   { name: 'Sleight of Hand (Prestidigitação)', base: 10 },
   { name: 'Spot Hidden (Detectar)', base: 25 },
   { name: 'Stealth (Furtividade)', base: 20 },
@@ -243,7 +285,7 @@ function createDefaultSkills(characterId, dex, edu) {
 // ─── Character Queries ───────────────────────────────────────
 const characterQueries = {
   listAll() {
-    return query('SELECT id, name, player, occupation, age FROM characters ORDER BY updated_at DESC');
+    return query('SELECT id, uuid, name, player, occupation, age FROM characters ORDER BY updated_at DESC');
   },
 
   getById(id) {
@@ -255,17 +297,24 @@ const characterQueries = {
     return c;
   },
 
+  getByUuid(uuid) {
+    if (!uuid) return null;
+    return queryOne('SELECT id FROM characters WHERE uuid = ?', [uuid]);
+  },
+
   create(data) {
     const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
     const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
     const sanVal = data.san_max ?? (data.pow || 50) * 5;
+    const uuid   = data.uuid || randomUUID();
     db.run(`
       INSERT INTO characters
-        (name, player, occupation, age, gender, residence, birthplace,
+        (uuid, name, player, occupation, age, gender, residence, birthplace,
          str, dex, int_val, con, app, pow, siz, edu, luck,
          hp_current, hp_max, mp_current, mp_max, san_current, san_max)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
+        uuid,
         data.name || 'Novo Investigador',
         data.player || '', data.occupation || '',
         data.age || 25, data.gender || '', data.residence || '', data.birthplace || '',
@@ -288,13 +337,15 @@ const characterQueries = {
     const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
     const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
     const sanVal = data.san_max ?? (data.pow || 50) * 5;
+    const uuid   = data.uuid || randomUUID();
     db.run(`
       INSERT INTO characters
-        (name, player, occupation, age, gender, residence, birthplace,
+        (uuid, name, player, occupation, age, gender, residence, birthplace,
          str, dex, int_val, con, app, pow, siz, edu, luck,
          hp_current, hp_max, mp_current, mp_max, san_current, san_max)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
+        uuid,
         data.name || 'Importado', data.player || '', data.occupation || '',
         data.age || 25, data.gender || '', data.residence || '', data.birthplace || '',
         data.str || 50, data.dex || 50, data.int_val || 50,
@@ -307,8 +358,11 @@ const characterQueries = {
     );
     const id = lastInsertId();
     // Copy remaining text fields
-    const textFields = ['appearance_desc','ideology','significant_people','meaningful_locations',
-      'treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes','backstory','notes','image'];
+    const textFields = [
+      'appearance_desc','ideology','significant_people','meaningful_locations',
+      'treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes',
+      'backstory','notes','image','cash','assets','spending_level',
+    ];
     const updates = {};
     textFields.forEach(f => { if (data[f]) updates[f] = data[f]; });
     if (Object.keys(updates).length) {
@@ -320,32 +374,85 @@ const characterQueries = {
   },
 
   // Import: creates character + restores skills/weapons/possessions from JSON
+  // If character UUID already exists, updates instead of inserting
   import(data) {
-    const id = this._createRaw(data);
+    // Check if UUID already exists → update
+    if (data.uuid) {
+      const existing = this.getByUuid(data.uuid);
+      if (existing) {
+        return this._updateFromImport(existing.id, data);
+      }
+    }
 
+    const id = this._createRaw(data);
+    this._importRelations(id, data);
+    return id;
+  },
+
+  _updateFromImport(id, data) {
+    const allowed = [
+      'name','player','occupation','age','gender','residence','birthplace',
+      'str','dex','int_val','con','app','pow','siz','edu','luck',
+      'hp_current','hp_max','mp_current','mp_max','san_current','san_max',
+      'appearance_desc','ideology','significant_people','meaningful_locations',
+      'treasured_possessions','traits','injuries_scars','phobias_manias',
+      'arcane_tomes','backstory','notes','image','cash','assets','spending_level',
+    ];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+    if (fields.length) {
+      const setClause = fields.map(f => `${f} = ?`).join(', ');
+      db.run(
+        `UPDATE characters SET ${setClause}, updated_at = datetime('now') WHERE id = ?`,
+        [...fields.map(f => data[f]), id]
+      );
+    }
+    // Update skills if provided
+    if (data.skills?.length) {
+      db.run('DELETE FROM skills WHERE character_id = ?', [id]);
+      for (const s of data.skills) {
+        db.run(
+          'INSERT INTO skills (character_id, name, base_value, value, is_occupation, is_interest, occ_points, int_points, game_points) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]
+        );
+      }
+    }
+    // Update weapons if provided
+    if (data.weapons?.length) {
+      db.run('DELETE FROM weapons WHERE character_id = ?', [id]);
+      for (const w of data.weapons) {
+        db.run(
+          'INSERT INTO weapons (character_id, name, skill, damage, range, attacks_per_round, ammo, malfunction) VALUES (?,?,?,?,?,?,?,?)',
+          [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]
+        );
+      }
+    }
+    saveDb();
+    return id;
+  },
+
+  _importRelations(id, data) {
     if (data.skills?.length) {
       for (const s of data.skills) {
         db.run(
-          'INSERT INTO skills (character_id, name, base_value, value, is_occupation, is_interest) VALUES (?,?,?,?,?,?)',
-          [id, s.name, s.base_value || 0, s.value || 0, s.is_occupation || 0, s.is_interest || 0]
+          'INSERT INTO skills (character_id, name, base_value, value, is_occupation, is_interest, occ_points, int_points, game_points) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]
         );
       }
       saveDb();
     } else {
-      createDefaultSkills(id, data.dex || 50, data.edu || 50);
+      createDefaultSkills(id, data.dex||50, data.edu||50);
     }
 
-    for (const w of (data.weapons || [])) {
+    for (const w of (data.weapons||[])) {
       db.run(
         'INSERT INTO weapons (character_id, name, skill, damage, range, attacks_per_round, ammo, malfunction) VALUES (?,?,?,?,?,?,?,?)',
-        [id, w.name || '', w.skill || '', w.damage || '', w.range || '', w.attacks_per_round || '1', w.ammo || 0, w.malfunction || 100]
+        [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]
       );
     }
-    for (const p of (data.possessions || [])) {
-      db.run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [id, p.item || '']);
+    for (const p of (data.possessions||[])) {
+      db.run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [id, p.item||'']);
     }
     saveDb();
-    return id;
   },
 
   update(id, data) {
@@ -357,6 +464,7 @@ const characterQueries = {
       'appearance_desc','ideology','significant_people','meaningful_locations',
       'treasured_possessions','traits','injuries_scars','phobias_manias',
       'arcane_tomes','backstory','notes','image',
+      'cash','assets','spending_level',
     ];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
@@ -380,10 +488,26 @@ const characterQueries = {
 // ─── Skill Queries ───────────────────────────────────────────
 const skillQueries = {
   update(id, data) {
-    db.run(
-      'UPDATE skills SET value=?, is_occupation=?, is_interest=? WHERE id=?',
-      [data.value, data.is_occupation ? 1 : 0, data.is_interest ? 1 : 0, id]
-    );
+    // Support both old-style (value + is_occupation + is_interest)
+    // and new-style (occ_points + int_points + game_points)
+    if (data.occ_points !== undefined || data.int_points !== undefined || data.game_points !== undefined) {
+      // Get current base_value
+      const skill = queryOne('SELECT base_value FROM skills WHERE id = ?', [id]);
+      const base = skill?.base_value ?? 0;
+      const occ  = data.occ_points ?? 0;
+      const int_ = data.int_points ?? 0;
+      const game = data.game_points ?? 0;
+      const total = base + occ + int_ + game;
+      db.run(
+        'UPDATE skills SET occ_points=?, int_points=?, game_points=?, value=?, is_occupation=?, is_interest=? WHERE id=?',
+        [occ, int_, game, total, occ > 0 ? 1 : 0, int_ > 0 ? 1 : 0, id]
+      );
+    } else {
+      db.run(
+        'UPDATE skills SET value=?, is_occupation=?, is_interest=? WHERE id=?',
+        [data.value, data.is_occupation ? 1 : 0, data.is_interest ? 1 : 0, id]
+      );
+    }
     saveDb();
   },
   updateByName(characterId, nameLike, base) {

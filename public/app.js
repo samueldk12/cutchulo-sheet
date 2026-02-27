@@ -1,5 +1,104 @@
 'use strict';
 
+// ─── Descrições de Habilidades (tooltips) ────────────────────
+const SKILL_DESCRIPTIONS = {
+  'Accounting': 'Contabilidade: finanças, registros, detecção de fraudes.',
+  'Anthropology': 'Antropologia: culturas, costumes e comportamento humano.',
+  'Appraise': 'Avaliar: estimar valor de objetos e antiguidades.',
+  'Archaeology': 'Arqueologia: escavações, artefatos e civilizações antigas.',
+  'Art/Craft': 'Arte/Artesanato: criação de obras de arte ou artesanato.',
+  'Charm': 'Charme: sedução, lisonja e persuasão através do apelo pessoal.',
+  'Climb': 'Escalar: subir superfícies verticais com segurança.',
+  'Computer Use': 'Computador: programação, pesquisa e hacking de sistemas.',
+  'Credit Rating': 'Crédito: nível de riqueza e respeitabilidade social (0=miserável, 99=milionário).',
+  'Cthulhu Mythos': 'Mitos de Cthulhu: conhecimento dos horrores cósmicos. Reduz SAN máxima!',
+  'Demolitions': 'Demolições: uso de explosivos para destruição controlada.',
+  'Disguise': 'Disfarce: alterar aparência para enganar outros.',
+  'Diving': 'Mergulho: técnicas de mergulho e sobrevivência subaquática.',
+  'Dodge': 'Esquivar: evitar ataques e perigos físicos.',
+  'Drive Auto': 'Dirigir: operar automóveis e veículos motorizados.',
+  'Elec. Repair': 'Reparo Elétrico: consertar e instalar equipamentos elétricos.',
+  'Electronics': 'Eletrônica: construir, reparar e analisar dispositivos eletrônicos.',
+  'Fast Talk': 'Conversa Fiada: convencer rapidamente com argumentos falaciosos.',
+  'Fighting (Brawl)': 'Luta: combate corpo a corpo desarmado e com armas improvisadas.',
+  'Firearms (Handgun)': 'Pistola: uso de revólveres e pistolas.',
+  'Firearms (Rifle/Shotgun)': 'Rifle/Escopeta: uso de armas longas.',
+  'Firearms (Submachine Gun)': 'Submetralhadora: uso de SMGs e armas automáticas.',
+  'First Aid': 'Primeiros Socorros: tratamento emergencial de ferimentos.',
+  'History': 'História: conhecimento de eventos e personagens históricos.',
+  'Intimidate': 'Intimidar: coagir através de ameaças ou presença física.',
+  'Jump': 'Saltar: saltos horizontais e verticais.',
+  'Language (Other)': 'Idioma Estrangeiro: falar, ler e escrever em outro idioma.',
+  'Language (Own)': 'Idioma Próprio: fluência no idioma nativo do personagem.',
+  'Law': 'Direito: leis, procedimentos legais e jurisprudência.',
+  'Library Use': 'Pesquisa: buscar informações em bibliotecas e arquivos.',
+  'Listen': 'Ouvir: detectar sons e conversas próximas.',
+  'Locksmith': 'Ladrão de Cofres: abrir fechaduras e cofres sem a chave.',
+  'Mech. Repair': 'Reparo Mecânico: consertar motores e equipamentos mecânicos.',
+  'Medicine': 'Medicina: diagnóstico e tratamento médico completo.',
+  'Natural World': 'Mundo Natural: flora, fauna e fenômenos naturais.',
+  'Navigate': 'Navegação: usar mapas, bússola e estrelas para se orientar.',
+  'Occult': 'Ocultismo: conhecimento de rituais, simbolismo e tradições místicas.',
+  'Op. Heavy Machinery': 'Máquinas Pesadas: operar guindastes, escavadeiras e equipamentos industriais.',
+  'Persuade': 'Persuadir: convencer com argumentos racionais e emocionais.',
+  'Photography': 'Fotografia: tirar fotos de qualidade e revelar películas.',
+  'Pilot': 'Pilotagem: voar aeronaves ou pilotar embarcações.',
+  'Psychology': 'Psicologia: entender motivações e distúrbios mentais.',
+  'Psychoanalysis': 'Psicanálise: tratar distúrbios mentais e recuperar SAN.',
+  'Read Lips': 'Leitura Labial: entender o que alguém diz sem ouvi-lo.',
+  'Ride': 'Equitação: montar e controlar cavalos e animais.',
+  'Science (Biology)': 'Biologia: estudo dos seres vivos e processos vitais.',
+  'Science (Botany)': 'Botânica: estudo das plantas e fungos.',
+  'Science (Chemistry)': 'Química: reações químicas, substâncias e compostos.',
+  'Science (Cryptography)': 'Criptografia: cifras, códigos e mensagens secretas.',
+  'Science (Engineering)': 'Engenharia: projetos e construção de estruturas e máquinas.',
+  'Science (Forensics)': 'Forense: análise de cenas de crime e evidências físicas.',
+  'Science (Geology)': 'Geologia: rochas, minerais e formações terrestres.',
+  'Science (Mathematics)': 'Matemática: cálculos avançados e teorias matemáticas.',
+  'Science (Meteorology)': 'Meteorologia: tempo, clima e fenômenos atmosféricos.',
+  'Science (Pharmacy)': 'Farmácia: medicamentos, venenos e antídotos.',
+  'Science (Physics)': 'Física: leis da natureza, eletromagnetismo e termodinâmica.',
+  'Science (Zoology)': 'Zoologia: estudo dos animais e seu comportamento.',
+  'Sleight of Hand': 'Prestidigitação: pequenos truques, roubo de objetos e ilusionismo.',
+  'Spot Hidden': 'Detectar: notar detalhes ocultos, pistas e armadilhas.',
+  'Stealth': 'Furtividade: mover-se e agir sem ser percebido.',
+  'Survival': 'Sobrevivência: encontrar comida, abrigo e navegar em áreas selvagens.',
+  'Swim': 'Nadar: manter-se à tona e nadar em condições adversas.',
+  'Throw': 'Arremesso: atirar objetos com precisão.',
+  'Track': 'Rastrear: seguir rastros de pessoas e animais.',
+};
+
+function getSkillDescription(skillName) {
+  for (const [key, desc] of Object.entries(SKILL_DESCRIPTIONS)) {
+    if (skillName.includes(key)) return desc;
+  }
+  return skillName;
+}
+
+// ─── Preset de Armas CoC 7e ────────────────────────────────
+const WEAPON_PRESETS = [
+  { name: 'Soco (Fist/Punch)', skill: 'Fighting (Brawl) (Luta)', damage: '1d3+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Pontapé (Kick)', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Faca (Knife)', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Faca Bowie', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Machado (Axe)', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Machete', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Taco de Beisebol', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Espada (Sword)', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Pistola .22', skill: 'Firearms (Handgun) (Pistola)', damage: '1d6', range: '15m', attacks_per_round: '1/3', ammo: 9, malfunction: 99 },
+  { name: 'Revólver .38', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100 },
+  { name: 'Colt .45 Auto', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/3', ammo: 7, malfunction: 100 },
+  { name: 'Revólver .45', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100 },
+  { name: 'Luger P08', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '20m', attacks_per_round: '1/3', ammo: 8, malfunction: 100 },
+  { name: 'Escopeta 12 Gauge', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '4d6/2d6/1d6', range: '10m/20m/50m', attacks_per_round: '1/2', ammo: 2, malfunction: 100 },
+  { name: 'Winchester .30-06', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 5, malfunction: 100 },
+  { name: 'Springfield M1903', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 5, malfunction: 100 },
+  { name: 'Thompson M1928 (SMG)', skill: 'Firearms (Submachine Gun) (Submetralhadora)', damage: '1d10+2', range: '20m', attacks_per_round: '½/2/completo', ammo: 30, malfunction: 96 },
+  { name: 'Browning BAR', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1/full', ammo: 20, malfunction: 100 },
+  { name: 'Dinamite (1 bastão)', skill: 'Demolitions (Demolições)', damage: '4d10', range: 'Arremesso', attacks_per_round: '1', ammo: 1, malfunction: 100 },
+  { name: 'Granada de mão', skill: 'Throw (Arremesso)', damage: '4d6+2', range: '10m', attacks_per_round: '1', ammo: 1, malfunction: 100 },
+];
+
 // ─── Estado Global ────────────────────────────────────────────
 const state = {
   characters: [],
@@ -109,6 +208,10 @@ async function init() {
   setupPortrait();
   setupBooks();
   setupEvidence();
+  setupFriends();
+  // Populate weapon presets datalist
+  const dl = $('#weapon-presets');
+  if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
 }
 
 async function loadConfig() {
@@ -293,6 +396,15 @@ function populateSheet(c) {
   renderWeapons();
   renderPossessions();
 
+  // Gold/wealth fields
+  const cashEl = $('#field-cash'); if (cashEl) cashEl.value = c.cash || '';
+  const spendEl = $('#field-spending-level'); if (spendEl) spendEl.value = c.spending_level || '';
+  const assetsEl = $('#field-assets'); if (assetsEl) assetsEl.value = c.assets || '';
+
+  // Show/hide export-friend button
+  const exportFriendBtn = $('#btn-export-friend');
+  if (exportFriendBtn) exportFriendBtn.style.display = 'inline-flex';
+
   // Background fields
   const bgMap = [
     ['#bg-appearance','appearance_desc'], ['#bg-ideology','ideology'],
@@ -346,44 +458,64 @@ function renderSkills() {
   if (!skills.length) { grid.innerHTML = '<p style="color:var(--text-muted)">Nenhuma habilidade</p>'; return; }
 
   grid.innerHTML = skills.map(s => {
-    const isOcc = !!s.is_occupation, isInt = !!s.is_interest;
+    const occ  = s.occ_points  || 0;
+    const int_ = s.int_points  || 0;
+    const game = s.game_points || 0;
+    const total = (s.base_value || 0) + occ + int_ + game;
+    const rowCls = occ > 0 ? ' has-occ' : int_ > 0 ? ' has-int' : game > 0 ? ' has-game' : '';
+    const tooltip = getSkillDescription(s.name);
     return `
-    <div class="skill-row${isOcc ? ' has-occ' : ''}${isInt ? ' has-int' : ''}" data-skill-id="${s.id}">
-      <input type="checkbox" class="skill-cb occ" ${isOcc ? 'checked' : ''} title="Ocupação" />
-      <input type="checkbox" class="skill-cb int" ${isInt ? 'checked' : ''} title="Interesse" />
-      <span class="skill-name" title="${s.name}">${s.name}</span>
-      <input type="number" class="skill-input base" value="${s.base_value}" min="0" max="99" readonly title="Base" />
-      <input type="number" class="skill-input" value="${s.value}" min="0" max="99" title="Valor" />
-      <span class="skill-half-fifth" style="font-size:0.68rem;color:var(--text-muted);text-align:center">${half(s.value)}/${fifth(s.value)}</span>
+    <div class="skill-row${rowCls}" data-skill-id="${s.id}">
+      <span class="skill-name" title="${tooltip}">${s.name}</span>
+      <input type="number" class="skill-input base" value="${s.base_value}" min="0" max="99" readonly title="Valor base" />
+      <input type="number" class="skill-input occ" value="${occ}" min="0" max="99" title="Pts. Ocupação" />
+      <input type="number" class="skill-input int_" value="${int_}" min="0" max="99" title="Pts. Interesse" />
+      <input type="number" class="skill-input game" value="${game}" min="0" max="99" title="Pts. durante o Jogo" />
+      <input type="number" class="skill-input total" value="${total}" min="0" max="99" readonly title="Total" />
+      <span class="skill-half-fifth">${half(total)}/${fifth(total)}</span>
       <button class="skill-roll-btn" data-skill-id="${s.id}" title="Rolar d100 contra ${s.name}">🎲</button>
     </div>`;
   }).join('');
 
   grid.querySelectorAll('.skill-row').forEach(row => {
     const sId = +row.dataset.skillId;
-    const cbOcc = row.querySelector('.skill-cb.occ');
-    const cbInt = row.querySelector('.skill-cb.int');
-    const valInput = row.querySelectorAll('.skill-input')[1];
+    const occInp  = row.querySelector('.skill-input.occ');
+    const intInp  = row.querySelector('.skill-input.int_');
+    const gameInp = row.querySelector('.skill-input.game');
+    const totalInp = row.querySelector('.skill-input.total');
     const halfFifth = row.querySelector('.skill-half-fifth');
 
     const save = () => {
-      const val = +valInput.value || 0;
-      if (halfFifth) halfFifth.textContent = `${half(val)}/${fifth(val)}`;
-      row.classList.toggle('has-occ', cbOcc.checked);
-      row.classList.toggle('has-int', cbInt.checked);
-      api.put(`/api/skills/${sId}`, { value: val, is_occupation: cbOcc.checked ? 1 : 0, is_interest: cbInt.checked ? 1 : 0 })
+      const occV  = Math.max(0, +occInp.value  || 0);
+      const intV  = Math.max(0, +intInp.value  || 0);
+      const gameV = Math.max(0, +gameInp.value || 0);
+      const sk = state.current.skills.find(s => s.id === sId);
+      const base = sk?.base_value || 0;
+      const total = base + occV + intV + gameV;
+
+      if (totalInp) totalInp.value = total;
+      if (halfFifth) halfFifth.textContent = `${half(total)}/${fifth(total)}`;
+
+      row.classList.toggle('has-occ',  occV  > 0);
+      row.classList.toggle('has-int',  intV  > 0);
+      row.classList.toggle('has-game', gameV > 0);
+
+      if (sk) {
+        sk.occ_points = occV; sk.int_points = intV; sk.game_points = gameV;
+        sk.value = total; sk.is_occupation = occV > 0 ? 1 : 0; sk.is_interest = intV > 0 ? 1 : 0;
+      }
+
+      api.put(`/api/skills/${sId}`, { occ_points: occV, int_points: intV, game_points: gameV })
         .then(() => {
-          const sk = state.current.skills.find(s => s.id === sId);
-          if (sk) { sk.value = val; sk.is_occupation = cbOcc.checked ? 1 : 0; sk.is_interest = cbInt.checked ? 1 : 0; }
-          // If Cthulhu Mythos changed, update SAN hint
           if (sk?.name.includes('Cthulhu Mythos')) updateSanMaxHint();
           showSaveIndicator();
+          updateSkillPoints();
         }).catch(console.error);
     };
 
-    cbOcc.addEventListener('change', save);
-    cbInt.addEventListener('change', save);
-    valInput.addEventListener('change', () => { save(); setTimeout(updateSkillPoints, 50); });
+    occInp.addEventListener('change', save);
+    intInp.addEventListener('change', save);
+    gameInp.addEventListener('change', save);
 
     // Click to roll
     row.querySelector('.skill-roll-btn').addEventListener('click', () => {
@@ -408,9 +540,8 @@ function updateSkillPoints() {
 
   let occUsed = 0, intUsed = 0;
   (c.skills || []).forEach(s => {
-    const raised = Math.max(0, (s.value || 0) - (s.base_value || 0));
-    if (s.is_occupation) occUsed += raised;
-    else if (s.is_interest) intUsed += raised;
+    occUsed  += (s.occ_points  || 0);
+    intUsed  += (s.int_points  || 0);
   });
 
   const occAvail = occTotal - occUsed;
@@ -444,31 +575,73 @@ function updateSkillPoints() {
 }
 
 // ─── Weapons ─────────────────────────────────────────────────
+function resolveWeaponSkillValue(skillText) {
+  // If numeric, use directly
+  const num = parseInt(skillText, 10);
+  if (!isNaN(num)) return { name: `Arma (${num}%)`, value: num };
+  // Search character skills
+  const sk = state.current?.skills?.find(s => s.name.toLowerCase().includes(skillText.toLowerCase().split('(')[0].trim()));
+  if (sk) return { name: sk.name, value: sk.value };
+  return null;
+}
+
 function renderWeapons() {
   const tbody = $('#weapons-tbody');
   const weapons = state.current?.weapons || [];
-  if (!weapons.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="8">Nenhuma arma cadastrada</td></tr>'; return; }
+  if (!weapons.length) { tbody.innerHTML = '<tr class="empty-row"><td colspan="9">Nenhuma arma cadastrada</td></tr>'; return; }
 
   tbody.innerHTML = weapons.map(w => `
     <tr data-weapon-id="${w.id}">
-      <td><input class="weapon-input" data-field="name" value="${w.name||''}" placeholder="Arma" /></td>
-      <td><input class="weapon-input" data-field="skill" value="${w.skill||''}" placeholder="%" style="width:60px"/></td>
-      <td><input class="weapon-input" data-field="damage" value="${w.damage||''}" placeholder="1d6" style="width:70px"/></td>
-      <td><input class="weapon-input" data-field="range" value="${w.range||''}" placeholder="Toque" style="width:70px"/></td>
-      <td><input class="weapon-input" data-field="attacks_per_round" value="${w.attacks_per_round||'1'}" style="width:50px"/></td>
+      <td><input class="weapon-input" data-field="name" list="weapon-presets" value="${(w.name||'').replace(/"/g,'&quot;')}" placeholder="Arma" /></td>
+      <td><input class="weapon-input" data-field="skill" value="${(w.skill||'').replace(/"/g,'&quot;')}" placeholder="Habilidade ou %" style="width:80px"/></td>
+      <td><input class="weapon-input" data-field="damage" value="${(w.damage||'').replace(/"/g,'&quot;')}" placeholder="1d6" style="width:70px"/></td>
+      <td><input class="weapon-input" data-field="range" value="${(w.range||'').replace(/"/g,'&quot;')}" placeholder="Toque" style="width:70px"/></td>
+      <td><input class="weapon-input" data-field="attacks_per_round" value="${(w.attacks_per_round||'1').replace(/"/g,'&quot;')}" style="width:50px"/></td>
       <td><input class="weapon-input" type="number" data-field="ammo" value="${w.ammo||0}" style="width:50px"/></td>
       <td><input class="weapon-input" type="number" data-field="malfunction" value="${w.malfunction||100}" style="width:50px"/></td>
+      <td><button class="btn-weapon-roll" data-wid="${w.id}" title="Rolar com ${(w.name||'arma').replace(/"/g,'&quot;')}">🎲 Rolar</button></td>
       <td><button class="btn-remove btn-remove-weapon" data-id="${w.id}">✕</button></td>
     </tr>`).join('');
 
   tbody.querySelectorAll('tr[data-weapon-id]').forEach(row => {
     const wId = +row.dataset.weaponId;
+    const nameInput = row.querySelector('[data-field="name"]');
+
     const save = () => {
       const data = {};
       row.querySelectorAll('[data-field]').forEach(i => { data[i.dataset.field] = i.type === 'number' ? (+i.value||0) : i.value; });
+      const w = state.current.weapons.find(x => x.id === wId);
+      if (w) Object.assign(w, data);
       api.put(`/api/weapons/${wId}`, data).then(() => showSaveIndicator()).catch(console.error);
     };
-    row.querySelectorAll('[data-field]').forEach(i => i.addEventListener('change', save));
+
+    // Autocomplete: when name matches a preset, auto-fill fields
+    nameInput.addEventListener('change', () => {
+      const preset = WEAPON_PRESETS.find(p => p.name === nameInput.value);
+      if (preset) {
+        row.querySelector('[data-field="skill"]').value             = preset.skill;
+        row.querySelector('[data-field="damage"]').value            = preset.damage;
+        row.querySelector('[data-field="range"]').value             = preset.range;
+        row.querySelector('[data-field="attacks_per_round"]').value = preset.attacks_per_round;
+        row.querySelector('[data-field="ammo"]').value              = preset.ammo;
+        row.querySelector('[data-field="malfunction"]').value       = preset.malfunction;
+      }
+      save();
+    });
+
+    row.querySelectorAll('[data-field]:not([data-field="name"])').forEach(i => i.addEventListener('change', save));
+
+    // Roll button
+    row.querySelector('.btn-weapon-roll').addEventListener('click', () => {
+      const w = state.current.weapons.find(x => x.id === wId);
+      if (!w) return;
+      const resolved = resolveWeaponSkillValue(w.skill || '');
+      if (resolved) {
+        openDiceRollerWithTarget(`${w.name || 'Arma'} (${resolved.name})`, resolved.value);
+      } else {
+        alert(`Habilidade "${w.skill}" não encontrada. Preencha o campo Habilidade com um nome ou valor numérico.`);
+      }
+    });
   });
 
   tbody.querySelectorAll('.btn-remove-weapon').forEach(btn =>
@@ -556,7 +729,7 @@ function setupEventListeners() {
     $('#empty-state').style.display = 'flex';
   });
 
-  // Exportar
+  // Exportar completo
   $('#btn-export-char').addEventListener('click', async () => {
     if (!state.current) return;
     try {
@@ -569,6 +742,21 @@ function setupEventListeners() {
       a.click();
       URL.revokeObjectURL(url);
     } catch (e) { alert('Erro ao exportar: ' + e.message); }
+  });
+
+  // Exportar versão amigo (sem lore)
+  $('#btn-export-friend').addEventListener('click', async () => {
+    if (!state.current) return;
+    try {
+      const resp = await fetch(`/api/export-friend/${state.current.id}`);
+      const blob = await resp.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${(state.current.name || 'personagem').replace(/[^a-z0-9]/gi, '_')}_amigo.json`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { alert('Erro ao exportar versão amigo: ' + e.message); }
   });
 
   // Importar
@@ -613,6 +801,8 @@ function setupEventListeners() {
   bindText('#field-name','name'); bindText('#field-player','player');
   bindText('#field-occupation','occupation'); bindText('#field-gender','gender');
   bindText('#field-residence','residence'); bindText('#field-birthplace','birthplace');
+  bindText('#field-cash','cash'); bindText('#field-spending-level','spending_level');
+  bindText('#field-assets','assets');
 
   $('#field-age').addEventListener('change', () => {
     if (!state.current) return;
@@ -1316,12 +1506,35 @@ function renderEvidence() {
 }
 
 // ─── Portrait Image ───────────────────────────────────────────
+function showImageFullscreen(src) {
+  const overlay = Object.assign(document.createElement('div'), {
+    style: 'position:fixed;inset:0;background:rgba(0,0,0,0.92);z-index:9999;display:flex;align-items:center;justify-content:center;cursor:zoom-out',
+  });
+  const bigImg = Object.assign(document.createElement('img'), {
+    src,
+    style: 'max-width:90vw;max-height:90vh;border-radius:8px;box-shadow:0 0 60px rgba(0,0,0,0.9)',
+  });
+  overlay.appendChild(bigImg);
+  overlay.addEventListener('click', () => overlay.remove());
+  document.body.appendChild(overlay);
+}
+
 function setupPortrait() {
   const area      = $('#portrait-area');
   const fileInput = $('#portrait-file');
+  const hint      = $('#portrait-fullscreen-hint');
   if (!area || !fileInput) return;
 
-  area.addEventListener('click', () => { if (state.current) fileInput.click(); });
+  area.addEventListener('click', (e) => {
+    const img = $('#portrait-img');
+    // If image is visible and click is not on a child input, show fullscreen
+    if (img && img.style.display === 'block' && e.target !== fileInput) {
+      showImageFullscreen(img.src);
+      return;
+    }
+    if (state.current) fileInput.click();
+  });
+
   fileInput.addEventListener('change', async (e) => {
     const file = e.target.files[0];
     if (!file || !state.current) return;
@@ -1339,15 +1552,18 @@ function setupPortrait() {
 function displayPortrait(base64) {
   const img         = $('#portrait-img');
   const placeholder = $('#portrait-placeholder');
+  const hint        = $('#portrait-fullscreen-hint');
   if (!img || !placeholder) return;
   if (base64) {
     img.src             = base64;
     img.style.display   = 'block';
     placeholder.style.display = 'none';
+    if (hint) { hint.style.display = 'block'; hint.textContent = '🔍 Ampliar'; }
   } else {
     img.src             = '';
     img.style.display   = 'none';
     placeholder.style.display = 'flex';
+    if (hint) hint.style.display = 'none';
   }
 }
 
@@ -1373,6 +1589,76 @@ function compressPortrait(file, maxW, maxH) {
     };
     reader.readAsDataURL(file);
   });
+}
+
+// ─── Amigos / Friend Characters ──────────────────────────────
+function setupFriends() {
+  const btn = $('#btn-friends');
+  if (!btn) return;
+  btn.addEventListener('click', () => {
+    loadFriendCharacters();
+    $('#friends-modal').classList.add('open');
+  });
+  $('#friends-modal-close').addEventListener('click', () => $('#friends-modal').classList.remove('open'));
+
+  $('#friend-import-file').addEventListener('change', async (e) => {
+    const file = e.target.files[0];
+    if (!file) return;
+    try {
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const charData = parsed.character || parsed;
+      if (!charData.name) { alert('JSON inválido: campo "name" não encontrado'); return; }
+      const imported = await api.post('/api/import', { character: charData });
+      state.characters = await api.get('/api/characters');
+      renderCharacterList();
+      loadFriendCharacters();
+      alert(`"${imported.name}" importado/atualizado com sucesso!`);
+    } catch (err) { alert('Erro ao importar amigo: ' + err.message); }
+    e.target.value = '';
+  });
+}
+
+async function loadFriendCharacters() {
+  try {
+    const chars = await api.get('/api/gm');
+    renderFriendCharacters(chars);
+  } catch (e) { console.error(e); }
+}
+
+function renderFriendCharacters(chars) {
+  const grid = $('#friends-grid');
+  if (!grid) return;
+  if (!chars.length) {
+    grid.innerHTML = '<div class="friends-empty">Nenhum personagem importado ainda.<br><small>Use "Exportar Amigo" na ficha de um personagem para gerar o arquivo de compartilhamento.</small></div>';
+    return;
+  }
+  grid.innerHTML = chars.map(c => {
+    const hpPct  = c.hp_max  ? Math.round((c.hp_current  / c.hp_max)  * 100) : 0;
+    const sanPct = c.san_max ? Math.round((c.san_current / c.san_max) * 100) : 0;
+    const mpPct  = c.mp_max  ? Math.round((c.mp_current  / c.mp_max)  * 100) : 0;
+    const topSkills = (c.skills || [])
+      .filter(s => (s.occ_points || 0) + (s.int_points || 0) + (s.game_points || 0) > 0 || s.value > s.base_value)
+      .sort((a, b) => b.value - a.value)
+      .slice(0, 5);
+    const hasWeapons = (c.weapons || []).filter(w => w.name).length > 0;
+    return `<div class="friend-card">
+      ${c.image
+        ? `<img class="friend-portrait" src="${c.image}" alt="${c.name}" style="cursor:zoom-in" onclick="showImageFullscreen('${c.image}')" />`
+        : '<div class="friend-portrait-placeholder">👤</div>'}
+      <div class="friend-info">
+        <div class="friend-name">${c.name || '—'}</div>
+        <div class="friend-sub">${[c.occupation, c.age ? c.age + ' anos' : ''].filter(Boolean).join(' · ') || '—'}</div>
+        <div class="friend-vitals">
+          <div class="fv-item"><span>HP</span><div class="fv-bar"><div class="fv-fill fv-hp" style="width:${hpPct}%"></div></div><span>${c.hp_current}/${c.hp_max}</span></div>
+          <div class="fv-item"><span>SAN</span><div class="fv-bar"><div class="fv-fill fv-san" style="width:${sanPct}%"></div></div><span>${c.san_current}/${c.san_max}</span></div>
+          <div class="fv-item"><span>MP</span><div class="fv-bar"><div class="fv-fill fv-mp" style="width:${mpPct}%"></div></div><span>${c.mp_current}/${c.mp_max}</span></div>
+        </div>
+        ${topSkills.length ? `<div class="friend-skills">🎯 ${topSkills.map(s => `${s.name.split('(')[0].trim()}: <b>${s.value}%</b>`).join(' · ')}</div>` : ''}
+        ${hasWeapons ? `<div class="friend-weapons">🗡 ${c.weapons.filter(w => w.name).map(w => w.name).join(', ')}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
 }
 
 // ─── Bootstrap ────────────────────────────────────────────────
