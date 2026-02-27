@@ -209,6 +209,7 @@ async function init() {
   setupBooks();
   setupEvidence();
   setupFriends();
+  setupNpcs();
   // Populate weapon presets datalist
   const dl = $('#weapon-presets');
   if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
@@ -1591,6 +1592,372 @@ function compressPortrait(file, maxW, maxH) {
   });
 }
 
+// ═══════════════════════════════════════════════════════
+// NPCs / INIMIGOS / MONSTROS
+// ═══════════════════════════════════════════════════════
+
+const npcState = {
+  list: [],
+  current: null,
+  filter: 'all',
+};
+
+const NPC_TYPE_LABELS = {
+  npc:     { icon: '👤', label: 'NPC',     cls: 'npc-type-npc'     },
+  enemy:   { icon: '⚔️', label: 'Inimigo', cls: 'npc-type-enemy'   },
+  monster: { icon: '👹', label: 'Monstro', cls: 'npc-type-monster' },
+};
+
+function setupNpcs() {
+  const btn = $('#btn-npcs');
+  if (!btn) return;
+
+  btn.addEventListener('click', () => {
+    loadNpcs();
+    $('#npcs-modal').classList.add('open');
+  });
+  $('#npcs-modal-close').addEventListener('click', closeNpcModal);
+
+  // Criar NPC/Inimigo/Monstro
+  ['btn-add-npc','btn-add-enemy','btn-add-monster'].forEach(id => {
+    $(`#${id}`)?.addEventListener('click', async () => {
+      const type = $(`#${id}`).dataset.type;
+      const n = await api.post('/api/npcs', { type });
+      npcState.list.unshift(n);
+      renderNpcList();
+      selectNpc(n.id);
+    });
+  });
+
+  // Filtros
+  $$('.npc-filter-btn').forEach(b =>
+    b.addEventListener('click', () => {
+      $$('.npc-filter-btn').forEach(x => x.classList.remove('active'));
+      b.classList.add('active');
+      npcState.filter = b.dataset.filter;
+      renderNpcList();
+    })
+  );
+
+  // Excluir NPC atual
+  $('#btn-delete-npc').addEventListener('click', async () => {
+    if (!npcState.current) return;
+    if (!confirm(`Excluir "${npcState.current.name}"?`)) return;
+    await api.delete(`/api/npcs/${npcState.current.id}`);
+    npcState.list = npcState.list.filter(n => n.id !== npcState.current.id);
+    npcState.current = null;
+    renderNpcList();
+    $('#npc-editor').style.display = 'none';
+  });
+
+  // Botão adicionar ataque
+  $('#btn-add-attack').addEventListener('click', () => {
+    if (!npcState.current) return;
+    let attacks = [];
+    try { attacks = JSON.parse(npcState.current.attacks || '[]'); } catch(e) {}
+    attacks.push({ name: 'Novo Ataque', skill_pct: 25, damage: '1d6', notes: '' });
+    npcState.current.attacks = JSON.stringify(attacks);
+    renderNpcAttacks(attacks);
+    saveCurrentNpc({ attacks: npcState.current.attacks });
+  });
+
+  // Foto do NPC
+  const portraitArea = $('#npc-portrait-area');
+  const portraitFile = $('#npc-portrait-file');
+  if (portraitArea && portraitFile) {
+    portraitArea.addEventListener('click', () => {
+      const img = $('#npc-portrait-img');
+      if (img && img.style.display === 'block') { showImageFullscreen(img.src); return; }
+      if (npcState.current) portraitFile.click();
+    });
+    portraitFile.addEventListener('change', async (e) => {
+      const file = e.target.files[0];
+      if (!file || !npcState.current) return;
+      const base64 = await compressPortrait(file, 160, 160);
+      npcState.current.image = base64;
+      displayNpcPortrait(base64);
+      const item = npcState.list.find(n => n.id === npcState.current.id);
+      if (item) item.image = base64;
+      saveCurrentNpc({ image: base64 });
+      e.target.value = '';
+    });
+  }
+
+  // Vitais ± no editor
+  $$('#npc-editor .npc-vital-btn').forEach(btn => {
+    btn.addEventListener('click', () => {
+      if (!npcState.current) return;
+      const vital = btn.dataset.vital;
+      const dir   = +btn.dataset.dir;
+      const max   = +$(`#npc-${vital}-max`).value || 0;
+      let cur = (npcState.current[`${vital}_current`] || 0) + dir;
+      cur = Math.max(0, Math.min(max, cur));
+      npcState.current[`${vital}_current`] = cur;
+      $(`#npc-${vital}-cur`).textContent = cur;
+      const item = npcState.list.find(n => n.id === npcState.current.id);
+      if (item) item[`${vital}_current`] = cur;
+      saveCurrentNpc({ [`${vital}_current`]: cur });
+    });
+  });
+
+  // Campos auto-save (debounced)
+  const saveFields = [
+    ['#npc-name','name'], ['#npc-type','type'], ['#npc-description','description'],
+    ['#npc-str','str'], ['#npc-dex','dex'], ['#npc-int','int_val'],
+    ['#npc-con','con'], ['#npc-pow','pow'], ['#npc-siz','siz'],
+    ['#npc-armor','armor'], ['#npc-damage-bonus','damage_bonus'],
+    ['#npc-skills-text','skills_text'],
+    ['#npc-special','special_abilities'], ['#npc-notes','notes'],
+  ];
+  const npcDebounceTimers = {};
+  saveFields.forEach(([sel, field]) => {
+    const el = $(sel);
+    if (!el) return;
+    el.addEventListener('input', () => {
+      if (!npcState.current) return;
+      npcState.current[field] = el.type === 'number' ? (+el.value || 0) : el.value;
+      clearTimeout(npcDebounceTimers[field]);
+      npcDebounceTimers[field] = setTimeout(() => {
+        saveCurrentNpc({ [field]: npcState.current[field] });
+        if (['str','dex','con','pow','siz'].includes(field)) autoCalcNpcVitals();
+        if (field === 'name' || field === 'type') {
+          const item = npcState.list.find(n => n.id === npcState.current.id);
+          if (item) { item.name = npcState.current.name; item.type = npcState.current.type; }
+          renderNpcList();
+          updateNpcEditorTitle();
+          // Ocultar SAN para monstros
+          const sanBlock = $('#npc-san-block');
+          if (sanBlock) sanBlock.style.display = npcState.current.type === 'monster' ? 'none' : '';
+        }
+      }, 600);
+    });
+  });
+
+  // Max HP/MP/SAN: atualizar current se necessário
+  ['hp','mp','san'].forEach(vital => {
+    $(`#npc-${vital}-max`)?.addEventListener('change', () => {
+      if (!npcState.current) return;
+      const max = +$(`#npc-${vital}-max`).value || 0;
+      npcState.current[`${vital}_max`] = max;
+      if ((npcState.current[`${vital}_current`] || 0) > max) {
+        npcState.current[`${vital}_current`] = max;
+        $(`#npc-${vital}-cur`).textContent = max;
+      }
+      const item = npcState.list.find(n => n.id === npcState.current.id);
+      if (item) { item[`${vital}_max`] = max; item[`${vital}_current`] = npcState.current[`${vital}_current`]; }
+      saveCurrentNpc({ [`${vital}_max`]: max, [`${vital}_current`]: npcState.current[`${vital}_current`] });
+    });
+  });
+}
+
+function autoCalcNpcVitals() {
+  if (!npcState.current) return;
+  const c = npcState.current;
+  const hpMax  = Math.max(1, Math.floor(((c.con || 50) + (c.siz || 50)) / 10));
+  const mpMax  = Math.max(1, Math.floor((c.pow || 50) / 5));
+  const sanMax = c.type === 'monster' ? 0 : (c.pow || 50) * 5;
+  const { db } = calcDamageBonus(c.str || 50, c.siz || 50);
+
+  $('#npc-hp-max').value       = hpMax;
+  $('#npc-mp-max').value       = mpMax;
+  $('#npc-san-max').value      = sanMax;
+  $('#npc-damage-bonus').value = db;
+
+  const updates = { hp_max: hpMax, mp_max: mpMax, san_max: sanMax, damage_bonus: db };
+  if ((c.hp_current || 0) > hpMax) {
+    updates.hp_current = hpMax;
+    $('#npc-hp-cur').textContent = hpMax;
+  }
+  Object.assign(c, updates);
+  saveCurrentNpc(updates);
+}
+
+function closeNpcModal() {
+  $('#npcs-modal').classList.remove('open');
+  $('#npc-editor').style.display = 'none';
+  npcState.current = null;
+}
+
+async function loadNpcs() {
+  try {
+    npcState.list = await api.get('/api/npcs');
+    renderNpcList();
+  } catch (e) { console.error(e); }
+}
+
+function renderNpcList() {
+  const container = $('#npcs-list');
+  if (!container) return;
+  const filtered = npcState.filter === 'all'
+    ? npcState.list
+    : npcState.list.filter(n => n.type === npcState.filter);
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="npcs-empty">Nenhum NPC neste filtro. Crie um com os botões acima.</div>';
+    return;
+  }
+
+  container.innerHTML = filtered.map(n => {
+    const t = NPC_TYPE_LABELS[n.type] || NPC_TYPE_LABELS.npc;
+    const hpPct = n.hp_max ? Math.round((n.hp_current / n.hp_max) * 100) : 0;
+    const isSelected = npcState.current?.id === n.id;
+    return `
+    <div class="npc-card ${t.cls}${isSelected ? ' npc-card-selected' : ''}" data-npc-id="${n.id}">
+      <div class="npc-card-avatar">
+        ${n.image
+          ? `<img src="${n.image}" alt="${n.name}" class="npc-card-img" />`
+          : `<span class="npc-card-icon">${t.icon}</span>`}
+      </div>
+      <div class="npc-card-info">
+        <div class="npc-card-name">${n.name || '—'}</div>
+        <div class="npc-card-type ${t.cls}">${t.label}</div>
+        ${n.description ? `<div class="npc-card-desc">${n.description}</div>` : ''}
+        <div class="npc-card-hp">
+          HP <span>${n.hp_current}/${n.hp_max}</span>
+          <div class="npc-hp-bar"><div class="npc-hp-fill" style="width:${hpPct}%"></div></div>
+        </div>
+      </div>
+      <button class="btn btn-sm btn-ghost npc-edit-btn" data-npc-id="${n.id}">✏️</button>
+    </div>`;
+  }).join('');
+
+  container.querySelectorAll('[data-npc-id]').forEach(el =>
+    el.addEventListener('click', (e) => {
+      const id = +e.currentTarget.dataset.npcId;
+      if (id) selectNpc(id);
+    })
+  );
+}
+
+async function selectNpc(id) {
+  try {
+    npcState.current = await api.get(`/api/npcs/${id}`);
+    populateNpcEditor(npcState.current);
+    renderNpcList();
+  } catch (e) { console.error(e); }
+}
+
+function populateNpcEditor(n) {
+  const editor = $('#npc-editor');
+  if (!editor) return;
+  editor.style.display = 'flex';
+  updateNpcEditorTitle();
+
+  $('#npc-name').value          = n.name || '';
+  $('#npc-type').value          = n.type || 'npc';
+  $('#npc-description').value   = n.description || '';
+  $('#npc-str').value           = n.str || 50;
+  $('#npc-dex').value           = n.dex || 50;
+  $('#npc-int').value           = n.int_val || 50;
+  $('#npc-con').value           = n.con || 50;
+  $('#npc-pow').value           = n.pow || 50;
+  $('#npc-siz').value           = n.siz || 50;
+  $('#npc-armor').value         = n.armor || 0;
+  $('#npc-damage-bonus').value  = n.damage_bonus || '';
+  $('#npc-hp-max').value        = n.hp_max || 10;
+  $('#npc-mp-max').value        = n.mp_max || 10;
+  $('#npc-san-max').value       = n.san_max || 0;
+  $('#npc-hp-cur').textContent  = n.hp_current ?? n.hp_max ?? 0;
+  $('#npc-mp-cur').textContent  = n.mp_current ?? n.mp_max ?? 0;
+  $('#npc-san-cur').textContent = n.san_current ?? n.san_max ?? 0;
+  $('#npc-skills-text').value   = n.skills_text || '';
+  $('#npc-special').value       = n.special_abilities || '';
+  $('#npc-notes').value         = n.notes || '';
+
+  // Ocultar SAN para monstros
+  const sanBlock = $('#npc-san-block');
+  if (sanBlock) sanBlock.style.display = n.type === 'monster' ? 'none' : '';
+
+  displayNpcPortrait(n.image || '');
+
+  let attacks = [];
+  try { attacks = JSON.parse(n.attacks || '[]'); } catch(e) {}
+  renderNpcAttacks(attacks);
+}
+
+function updateNpcEditorTitle() {
+  const n = npcState.current;
+  if (!n) return;
+  const t = NPC_TYPE_LABELS[n.type] || NPC_TYPE_LABELS.npc;
+  const el = $('#npc-editor-title');
+  if (el) el.textContent = `${t.icon} ${n.name || 'Sem nome'}`;
+}
+
+function displayNpcPortrait(base64) {
+  const img = $('#npc-portrait-img');
+  const ph  = $('#npc-portrait-placeholder');
+  if (!img || !ph) return;
+  if (base64) { img.src = base64; img.style.display = 'block'; ph.style.display = 'none'; }
+  else        { img.src = '';     img.style.display = 'none';  ph.style.display = 'flex'; }
+}
+
+function renderNpcAttacks(attacks) {
+  const container = $('#npc-attacks-list');
+  if (!container) return;
+  if (!attacks.length) {
+    container.innerHTML = '<div class="npc-attacks-empty">Nenhum ataque. Clique em "+ Ataque".</div>';
+    return;
+  }
+
+  container.innerHTML = attacks.map((a, i) => `
+    <div class="npc-attack-row" data-idx="${i}">
+      <input class="npc-atk-field" data-field="name" value="${(a.name||'').replace(/"/g,'&quot;')}" placeholder="Nome do Ataque" />
+      <input class="npc-atk-field npc-atk-pct" type="number" data-field="skill_pct" value="${a.skill_pct||25}" min="1" max="400" title="Chance (%)" />%
+      <input class="npc-atk-field npc-atk-dmg" data-field="damage" value="${(a.damage||'').replace(/"/g,'&quot;')}" placeholder="ex: 1d6+db" />
+      <input class="npc-atk-field npc-atk-notes" data-field="notes" value="${(a.notes||'').replace(/"/g,'&quot;')}" placeholder="Notas" />
+      <button class="btn btn-sm btn-ghost npc-roll-atk" data-idx="${i}" title="Rolar ataque">🎲</button>
+      <button class="btn-remove npc-del-atk" data-idx="${i}">✕</button>
+    </div>`).join('');
+
+  const syncAttacks = () => {
+    const updated = [...container.querySelectorAll('.npc-attack-row')].map(row => {
+      const obj = {};
+      row.querySelectorAll('[data-field]').forEach(inp => {
+        obj[inp.dataset.field] = inp.type === 'number' ? (+inp.value || 0) : inp.value;
+      });
+      return obj;
+    });
+    if (npcState.current) {
+      npcState.current.attacks = JSON.stringify(updated);
+      saveCurrentNpc({ attacks: npcState.current.attacks });
+      // Sync local array reference
+      attacks.splice(0, attacks.length, ...updated);
+    }
+  };
+
+  container.querySelectorAll('[data-field]').forEach(inp => inp.addEventListener('change', syncAttacks));
+
+  container.querySelectorAll('.npc-del-atk').forEach(btn =>
+    btn.addEventListener('click', () => {
+      attacks.splice(+btn.dataset.idx, 1);
+      if (npcState.current) {
+        npcState.current.attacks = JSON.stringify(attacks);
+        saveCurrentNpc({ attacks: npcState.current.attacks });
+      }
+      renderNpcAttacks(attacks);
+    })
+  );
+
+  container.querySelectorAll('.npc-roll-atk').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const atk = attacks[+btn.dataset.idx];
+      if (!atk) return;
+      openDiceRollerWithTarget(`${atk.name} (${npcState.current?.name || 'NPC'})`, atk.skill_pct || 25);
+    })
+  );
+}
+
+let _npcSaveTimer = null;
+function saveCurrentNpc(fields) {
+  if (!npcState.current) return;
+  clearTimeout(_npcSaveTimer);
+  _npcSaveTimer = setTimeout(async () => {
+    try { await api.put(`/api/npcs/${npcState.current.id}`, fields); }
+    catch (e) { console.error('Erro ao salvar NPC:', e); }
+  }, 400);
+}
+
+// Chamar setupNpcs() no init()
 // ─── Amigos / Friend Characters ──────────────────────────────
 function setupFriends() {
   const btn = $('#btn-friends');

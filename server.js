@@ -6,6 +6,7 @@ const {
   initDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
+  npcQueries,
   DEFAULT_CONFIG,
 } = require('./database');
 
@@ -298,6 +299,40 @@ app.put('/api/evidence/:id', (req, res) => {
 
 app.delete('/api/evidence/:id', (req, res) => {
   try { evidenceQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── NPCs / Inimigos ─────────────────────────────────────────
+
+app.get('/api/npcs', (req, res) => {
+  try { res.json(npcQueries.listAll()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/npcs/:id', (req, res) => {
+  try {
+    const n = npcQueries.getById(+req.params.id);
+    if (!n) return res.status(404).json({ error: 'NPC não encontrado' });
+    res.json(n);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/npcs', (req, res) => {
+  try {
+    const id = npcQueries.create(req.body);
+    res.status(201).json(npcQueries.getById(id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/npcs/:id', (req, res) => {
+  try {
+    npcQueries.update(+req.params.id, req.body);
+    res.json(npcQueries.getById(+req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/npcs/:id', (req, res) => {
+  try { npcQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 

@@ -34,6 +34,7 @@
 
   <div class="sidebar-bottom">
     <button class="sidebar-action-btn" id="btn-gm-view">🎭 Vista do Mestre</button>
+    <button class="sidebar-action-btn" id="btn-npcs">👹 NPCs / Inimigos</button>
     <button class="sidebar-action-btn" id="btn-books">📚 Livros / PDFs</button>
     <button class="sidebar-action-btn" id="btn-evidence">🔍 Evidências</button>
     <button class="sidebar-action-btn" id="btn-friends">👥 Amigos</button>
@@ -685,6 +686,134 @@
       <button class="modal-close" id="book-viewer-close">✕</button>
     </div>
     <iframe id="book-viewer-iframe" src="" title="Visualizador de PDF"></iframe>
+  </div>
+</div>
+
+<!-- ═══ MODAL: NPCs e Inimigos ═══ -->
+<div class="modal-overlay" id="npcs-modal">
+  <div class="modal npcs-modal">
+    <div class="modal-header">
+      <h2>👹 NPCs e Inimigos</h2>
+      <button class="modal-close" id="npcs-modal-close">✕</button>
+    </div>
+
+    <!-- Toolbar -->
+    <div class="npcs-toolbar">
+      <button class="btn btn-sm btn-primary" id="btn-add-npc" data-type="npc">+ NPC</button>
+      <button class="btn btn-sm btn-danger-outline" id="btn-add-enemy" data-type="enemy">+ Inimigo</button>
+      <button class="btn btn-sm btn-monster" id="btn-add-monster" data-type="monster">+ Monstro</button>
+      <div class="npcs-filter">
+        <button class="npc-filter-btn active" data-filter="all">Todos</button>
+        <button class="npc-filter-btn" data-filter="npc">NPCs</button>
+        <button class="npc-filter-btn" data-filter="enemy">Inimigos</button>
+        <button class="npc-filter-btn" data-filter="monster">Monstros</button>
+      </div>
+    </div>
+
+    <!-- Lista de NPCs -->
+    <div class="npcs-list" id="npcs-list">
+      <div class="npcs-empty">Nenhum NPC cadastrado. Crie um NPC, Inimigo ou Monstro.</div>
+    </div>
+
+    <!-- Painel de edição (aparece ao lado direito ao selecionar) -->
+    <div class="npc-editor" id="npc-editor" style="display:none">
+      <div class="npc-editor-header">
+        <h3 id="npc-editor-title">Editar NPC</h3>
+        <button class="btn btn-sm btn-danger" id="btn-delete-npc">Excluir</button>
+      </div>
+
+      <!-- Foto e identificação -->
+      <div class="npc-id-row">
+        <div class="npc-portrait-area" id="npc-portrait-area" title="Clique para adicionar imagem">
+          <img id="npc-portrait-img" src="" alt="" style="display:none" />
+          <div id="npc-portrait-placeholder">👤</div>
+          <input type="file" id="npc-portrait-file" accept="image/*" style="display:none" />
+        </div>
+        <div class="npc-id-fields">
+          <input type="text" class="field-input npc-field" id="npc-name" placeholder="Nome do NPC" />
+          <select class="field-input npc-field" id="npc-type">
+            <option value="npc">👤 NPC (Aliado/Neutro)</option>
+            <option value="enemy">⚔️ Inimigo (Humano)</option>
+            <option value="monster">👹 Monstro / Criatura</option>
+          </select>
+          <input type="text" class="field-input npc-field" id="npc-description" placeholder="Descrição rápida (ex: Detetive corrupto, 40 anos)" />
+        </div>
+      </div>
+
+      <!-- Stats -->
+      <div class="npc-section-title">Atributos</div>
+      <div class="npc-stats-grid">
+        <div class="npc-stat-block">
+          <label>FOR</label><input type="number" class="npc-stat npc-field" id="npc-str" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>DES</label><input type="number" class="npc-stat npc-field" id="npc-dex" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>INT</label><input type="number" class="npc-stat npc-field" id="npc-int" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>CON</label><input type="number" class="npc-stat npc-field" id="npc-con" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>POD</label><input type="number" class="npc-stat npc-field" id="npc-pow" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>TAM</label><input type="number" class="npc-stat npc-field" id="npc-siz" min="0" max="999" value="50" />
+        </div>
+        <div class="npc-stat-block">
+          <label>Armadura</label><input type="number" class="npc-stat npc-field" id="npc-armor" min="0" max="99" value="0" />
+        </div>
+        <div class="npc-stat-block">
+          <label>Bônus Dano</label><input type="text" class="npc-stat npc-field" id="npc-damage-bonus" placeholder="Nenhum" style="width:80px" />
+        </div>
+      </div>
+
+      <!-- Vitais -->
+      <div class="npc-section-title">Vitais</div>
+      <div class="npc-vitals-row">
+        <div class="npc-vital-block">
+          <span>HP</span>
+          <button class="npc-vital-btn" data-vital="hp" data-dir="-1">−</button>
+          <span class="npc-vital-cur" id="npc-hp-cur">10</span>/<input type="number" class="npc-vital-max npc-field" id="npc-hp-max" min="1" max="999" value="10" />
+          <button class="npc-vital-btn" data-vital="hp" data-dir="1">+</button>
+        </div>
+        <div class="npc-vital-block">
+          <span>MP</span>
+          <button class="npc-vital-btn" data-vital="mp" data-dir="-1">−</button>
+          <span class="npc-vital-cur" id="npc-mp-cur">10</span>/<input type="number" class="npc-vital-max npc-field" id="npc-mp-max" min="0" max="999" value="10" />
+          <button class="npc-vital-btn" data-vital="mp" data-dir="1">+</button>
+        </div>
+        <div class="npc-vital-block" id="npc-san-block">
+          <span>SAN</span>
+          <button class="npc-vital-btn" data-vital="san" data-dir="-1">−</button>
+          <span class="npc-vital-cur" id="npc-san-cur">50</span>/<input type="number" class="npc-vital-max npc-field" id="npc-san-max" min="0" max="99" value="50" />
+          <button class="npc-vital-btn" data-vital="san" data-dir="1">+</button>
+        </div>
+      </div>
+
+      <!-- Habilidades (texto livre) -->
+      <div class="npc-section-title">Habilidades</div>
+      <textarea class="npc-textarea npc-field" id="npc-skills-text"
+        placeholder="Ex: Luta (Briga) 45%, Pistola 40%, Esquivar 30%, Psicologia 25%, Intimidar 60%"></textarea>
+
+      <!-- Ataques -->
+      <div class="npc-section-title">
+        Ataques
+        <button class="btn btn-sm btn-ghost" id="btn-add-attack">+ Ataque</button>
+      </div>
+      <div id="npc-attacks-list"></div>
+
+      <!-- Habilidades especiais -->
+      <div class="npc-section-title">Habilidades Especiais / Poderes</div>
+      <textarea class="npc-textarea npc-field" id="npc-special"
+        placeholder="Ex: Regeneração 2 HP/turno, Invisibilidade, Causa Loucura (SAN 0/1d4)..."></textarea>
+
+      <!-- Notas do Mestre -->
+      <div class="npc-section-title">Notas do Mestre</div>
+      <textarea class="npc-textarea npc-field" id="npc-notes"
+        placeholder="Táticas, background, motivações, localização..."></textarea>
+    </div>
   </div>
 </div>
 

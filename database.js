@@ -163,6 +163,35 @@ function initSchema() {
       image TEXT DEFAULT '',
       created_at TEXT DEFAULT (datetime('now'))
     );
+
+    CREATE TABLE IF NOT EXISTS npcs (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT 'Novo NPC',
+      type TEXT DEFAULT 'npc',
+      description TEXT DEFAULT '',
+      str INTEGER DEFAULT 50,
+      dex INTEGER DEFAULT 50,
+      int_val INTEGER DEFAULT 50,
+      con INTEGER DEFAULT 50,
+      pow INTEGER DEFAULT 50,
+      siz INTEGER DEFAULT 50,
+      hp_current INTEGER DEFAULT 10,
+      hp_max INTEGER DEFAULT 10,
+      mp_current INTEGER DEFAULT 10,
+      mp_max INTEGER DEFAULT 10,
+      san_current INTEGER DEFAULT 50,
+      san_max INTEGER DEFAULT 50,
+      damage_bonus TEXT DEFAULT '',
+      build TEXT DEFAULT '',
+      armor INTEGER DEFAULT 0,
+      attacks TEXT DEFAULT '[]',
+      skills_text TEXT DEFAULT '',
+      special_abilities TEXT DEFAULT '',
+      notes TEXT DEFAULT '',
+      image TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
   `);
 
   // ─── Migrations (always safe to re-run) ──────────────────
@@ -617,9 +646,74 @@ const evidenceQueries = {
   },
 };
 
+// ─── NPC / Inimigo Queries ───────────────────────────────────
+const npcQueries = {
+  listAll() {
+    return query('SELECT id, name, type, description, hp_current, hp_max, mp_current, mp_max, san_current, san_max, armor, image, created_at FROM npcs ORDER BY type, name');
+  },
+
+  getById(id) {
+    return queryOne('SELECT * FROM npcs WHERE id = ?', [id]);
+  },
+
+  create(data) {
+    const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
+    const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
+    const sanMax = data.san_max ?? (data.type === 'monster' ? 0 : (data.pow || 50) * 5);
+    db.run(`
+      INSERT INTO npcs
+        (name, type, description, str, dex, int_val, con, pow, siz,
+         hp_current, hp_max, mp_current, mp_max, san_current, san_max,
+         damage_bonus, build, armor, attacks, skills_text, special_abilities, notes)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [
+        data.name || 'Novo NPC', data.type || 'npc', data.description || '',
+        data.str || 50, data.dex || 50, data.int_val || 50,
+        data.con || 50, data.pow || 50, data.siz || 50,
+        data.hp_current ?? hpMax, hpMax,
+        data.mp_current ?? mpMax, mpMax,
+        data.san_current ?? sanMax, sanMax,
+        data.damage_bonus || '', data.build || '',
+        data.armor || 0,
+        data.attacks || '[]',
+        data.skills_text || '',
+        data.special_abilities || '',
+        data.notes || '',
+      ]
+    );
+    const id = lastInsertId();
+    saveDb();
+    return id;
+  },
+
+  update(id, data) {
+    const allowed = [
+      'name', 'type', 'description',
+      'str', 'dex', 'int_val', 'con', 'pow', 'siz',
+      'hp_current', 'hp_max', 'mp_current', 'mp_max', 'san_current', 'san_max',
+      'damage_bonus', 'build', 'armor',
+      'attacks', 'skills_text', 'special_abilities', 'notes', 'image',
+    ];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+    if (!fields.length) return;
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    db.run(
+      `UPDATE npcs SET ${setClause}, updated_at = datetime('now') WHERE id = ?`,
+      [...fields.map(f => data[f]), id]
+    );
+    saveDb();
+  },
+
+  delete(id) {
+    db.run('DELETE FROM npcs WHERE id = ?', [id]);
+    saveDb();
+  },
+};
+
 module.exports = {
   initDb, getDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
+  npcQueries,
   DEFAULT_CONFIG,
 };
