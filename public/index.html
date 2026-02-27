@@ -1,0 +1,653 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Call of Cthulhu — Fichas de Personagem</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+<!-- ═══ SIDEBAR ═══ -->
+<aside class="sidebar" id="sidebar">
+  <div class="sidebar-header">
+    <div class="logo">
+      <span class="logo-eye">👁</span>
+      <h1>Call of Cthulhu</h1>
+    </div>
+  </div>
+
+  <div class="sidebar-section">
+    <button class="btn btn-primary btn-full" id="btn-new-character">+ Novo Investigador</button>
+  </div>
+
+  <div class="sidebar-section">
+    <h3 class="sidebar-label">Investigadores</h3>
+    <ul class="character-list" id="character-list">
+      <li class="char-list-empty">Nenhum investigador criado</li>
+    </ul>
+  </div>
+
+  <div class="sidebar-section">
+    <button class="btn btn-ghost btn-full" id="btn-dice-roller">🎲 Rolador de Dados</button>
+  </div>
+
+  <div class="sidebar-bottom">
+    <button class="sidebar-action-btn" id="btn-gm-view">🎭 Vista do Mestre</button>
+    <button class="sidebar-action-btn" id="btn-books">📚 Livros / PDFs</button>
+    <button class="sidebar-action-btn" id="btn-evidence">🔍 Evidências</button>
+    <label class="sidebar-action-btn" for="import-file">📥 Importar Personagem</label>
+    <input type="file" id="import-file" accept=".json" style="display:none" />
+    <button class="sidebar-action-btn" id="btn-config">⚙️ Configurações</button>
+  </div>
+</aside>
+
+<!-- ═══ MAIN CONTENT ═══ -->
+<main class="main-content" id="main-content">
+
+  <!-- Empty state -->
+  <div class="empty-state" id="empty-state">
+    <div class="empty-icon">🐙</div>
+    <h2>Ia! Ia! Cthulhu Fhtagn!</h2>
+    <p>Selecione um investigador ou crie um novo para começar</p>
+    <button class="btn btn-primary" id="btn-new-char-empty">Criar Investigador</button>
+  </div>
+
+  <!-- ── Character Sheet ── -->
+  <div class="character-sheet" id="character-sheet" style="display:none">
+
+    <!-- Header -->
+    <div class="sheet-header">
+      <div class="portrait-area" id="portrait-area" title="Clique para adicionar foto do personagem">
+        <img id="portrait-img" src="" alt="Retrato" style="display:none" />
+        <div class="portrait-placeholder" id="portrait-placeholder">👤</div>
+        <input type="file" id="portrait-file" accept="image/*" style="display:none" />
+      </div>
+      <div class="sheet-title-area">
+        <input type="text" class="char-name-input" id="field-name" placeholder="Nome do Investigador" />
+        <div class="sheet-subtitle">
+          <input type="text" class="inline-input" id="field-player" placeholder="Jogador" />
+          <span class="sep">|</span>
+          <input type="text" class="inline-input" id="field-occupation" placeholder="Ocupação" />
+        </div>
+      </div>
+      <div class="sheet-actions">
+        <button class="btn btn-secondary btn-sm" id="btn-export-char" title="Exportar personagem como JSON">📤 Exportar</button>
+        <button class="btn btn-danger btn-sm" id="btn-delete-char">Excluir</button>
+        <div class="save-indicator" id="save-indicator">Salvo ✓</div>
+      </div>
+    </div>
+
+    <!-- Tabs -->
+    <div class="tabs">
+      <button class="tab active" data-tab="info">Investigador</button>
+      <button class="tab" data-tab="skills">Habilidades</button>
+      <button class="tab" data-tab="combat">Combate</button>
+      <button class="tab" data-tab="background">Histórico</button>
+    </div>
+
+    <!-- ── TAB: Investigador ── -->
+    <div class="tab-content active" id="tab-info">
+
+      <div class="section-card">
+        <h3 class="section-title">Informações Pessoais</h3>
+        <div class="info-grid">
+          <div class="field-group">
+            <label>Idade</label>
+            <input type="number" class="field-input" id="field-age" min="15" max="99" />
+          </div>
+          <div class="field-group">
+            <label>Gênero</label>
+            <input type="text" class="field-input" id="field-gender" />
+          </div>
+          <div class="field-group">
+            <label>Residência</label>
+            <input type="text" class="field-input" id="field-residence" />
+          </div>
+          <div class="field-group">
+            <label>Local de Nascimento</label>
+            <input type="text" class="field-input" id="field-birthplace" />
+          </div>
+        </div>
+        <div class="age-warning" id="age-warning" style="display:none"></div>
+      </div>
+
+      <!-- Características -->
+      <div class="section-card">
+        <div class="card-header-row">
+          <h3 class="section-title" style="margin-bottom:0;border:none;padding:0">Características</h3>
+          <span class="section-hint" style="margin:0">Clique no valor de uma característica para rolar um teste</span>
+        </div>
+        <div class="characteristics-grid" style="margin-top:10px">
+          <div class="char-header-row">
+            <span>Característica</span><span>Valor</span><span>Metade</span><span>Quinto</span><span></span>
+          </div>
+          <div class="char-row" data-field="str">
+            <span class="char-label">FOR (STR)</span>
+            <input type="number" class="char-val" id="stat-str" min="1" max="99" />
+            <span class="char-half" id="stat-str-half">—</span>
+            <span class="char-fifth" id="stat-str-fifth">—</span>
+            <button class="char-roll-btn" data-stat="str" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="dex">
+            <span class="char-label">DES (DEX)</span>
+            <input type="number" class="char-val" id="stat-dex" min="1" max="99" />
+            <span class="char-half" id="stat-dex-half">—</span>
+            <span class="char-fifth" id="stat-dex-fifth">—</span>
+            <button class="char-roll-btn" data-stat="dex" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="int_val">
+            <span class="char-label">INT</span>
+            <input type="number" class="char-val" id="stat-int_val" min="1" max="99" />
+            <span class="char-half" id="stat-int_val-half">—</span>
+            <span class="char-fifth" id="stat-int_val-fifth">—</span>
+            <button class="char-roll-btn" data-stat="int_val" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="con">
+            <span class="char-label">CON</span>
+            <input type="number" class="char-val" id="stat-con" min="1" max="99" />
+            <span class="char-half" id="stat-con-half">—</span>
+            <span class="char-fifth" id="stat-con-fifth">—</span>
+            <button class="char-roll-btn" data-stat="con" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="app">
+            <span class="char-label">APA (APP)</span>
+            <input type="number" class="char-val" id="stat-app" min="1" max="99" />
+            <span class="char-half" id="stat-app-half">—</span>
+            <span class="char-fifth" id="stat-app-fifth">—</span>
+            <button class="char-roll-btn" data-stat="app" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="pow">
+            <span class="char-label">POD (POW)</span>
+            <input type="number" class="char-val" id="stat-pow" min="1" max="99" />
+            <span class="char-half" id="stat-pow-half">—</span>
+            <span class="char-fifth" id="stat-pow-fifth">—</span>
+            <button class="char-roll-btn" data-stat="pow" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="siz">
+            <span class="char-label">TAM (SIZ)</span>
+            <input type="number" class="char-val" id="stat-siz" min="1" max="99" />
+            <span class="char-half" id="stat-siz-half">—</span>
+            <span class="char-fifth" id="stat-siz-fifth">—</span>
+            <button class="char-roll-btn" data-stat="siz" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row" data-field="edu">
+            <span class="char-label">EDU</span>
+            <input type="number" class="char-val" id="stat-edu" min="1" max="99" />
+            <span class="char-half" id="stat-edu-half">—</span>
+            <span class="char-fifth" id="stat-edu-fifth">—</span>
+            <button class="char-roll-btn" data-stat="edu" title="Rolar teste">🎲</button>
+          </div>
+          <div class="char-row luck-row" data-field="luck">
+            <span class="char-label">SORTE (LUCK)</span>
+            <input type="number" class="char-val" id="stat-luck" min="1" max="99" />
+            <span class="char-half" id="stat-luck-half">—</span>
+            <span class="char-fifth" id="stat-luck-fifth">—</span>
+            <button class="char-roll-btn" data-stat="luck" title="Rolar teste de Sorte">🎲</button>
+          </div>
+        </div>
+        <!-- Derived skill-point hints -->
+        <div class="skill-pts-hint" id="skill-pts-hint">
+          <div class="sph-item">
+            <span class="sph-label">Pts. Ocupação</span>
+            <span class="sph-formula">(EDU×4)</span>
+            <span class="sph-val gold" id="sph-occ">—</span>
+          </div>
+          <div class="sph-item">
+            <span class="sph-label">Pts. Interesse</span>
+            <span class="sph-formula">(INT×2)</span>
+            <span class="sph-val blue" id="sph-int">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Status Vitais -->
+      <div class="section-card">
+        <div class="card-header-row">
+          <h3 class="section-title" style="margin-bottom:0;border:none;padding:0">Status Vitais</h3>
+          <span class="auto-calc-badge" id="auto-calc-badge" title="Cálculo automático de HP/MP/SAN ativo">⚡ Auto</span>
+        </div>
+        <div class="vitals-grid" style="margin-top:12px">
+
+          <div class="vital-block">
+            <div class="vital-label">PONTOS DE VIDA (HP)</div>
+            <div class="vital-controls">
+              <button class="vital-btn" data-vital="hp" data-dir="-1">−</button>
+              <div class="vital-display">
+                <span id="vital-hp-current" class="vital-current">10</span>
+                <span class="vital-sep">/</span>
+                <input type="number" id="vital-hp-max" class="vital-max" min="1" max="99" value="10" />
+              </div>
+              <button class="vital-btn" data-vital="hp" data-dir="1">+</button>
+            </div>
+            <div class="vital-bar"><div class="vital-bar-fill hp-bar" id="bar-hp"></div></div>
+          </div>
+
+          <div class="vital-block">
+            <div class="vital-label">PONTOS DE MAGIA (MP)</div>
+            <div class="vital-controls">
+              <button class="vital-btn" data-vital="mp" data-dir="-1">−</button>
+              <div class="vital-display">
+                <span id="vital-mp-current" class="vital-current">10</span>
+                <span class="vital-sep">/</span>
+                <input type="number" id="vital-mp-max" class="vital-max" min="1" max="99" value="10" />
+              </div>
+              <button class="vital-btn" data-vital="mp" data-dir="1">+</button>
+            </div>
+            <div class="vital-bar"><div class="vital-bar-fill mp-bar" id="bar-mp"></div></div>
+          </div>
+
+          <div class="vital-block">
+            <div class="vital-label">SANIDADE (SAN)</div>
+            <div class="vital-controls">
+              <button class="vital-btn" data-vital="san" data-dir="-1">−</button>
+              <div class="vital-display">
+                <span id="vital-san-current" class="vital-current">50</span>
+                <span class="vital-sep">/</span>
+                <input type="number" id="vital-san-max" class="vital-max" min="0" max="99" value="50" />
+              </div>
+              <button class="vital-btn" data-vital="san" data-dir="1">+</button>
+            </div>
+            <div class="vital-bar"><div class="vital-bar-fill san-bar" id="bar-san"></div></div>
+            <div class="san-hint" id="san-max-hint"></div>
+          </div>
+
+          <div class="vital-block vital-mov-block">
+            <div class="vital-label">MOVIMENTO (MOV)</div>
+            <div class="mov-value" id="vital-mov-value">8</div>
+            <div class="derived-mini">
+              <div class="derived-mini-item">
+                <span class="derived-mini-label">Dano</span>
+                <span class="derived-mini-val" id="derived-db">—</span>
+              </div>
+              <div class="derived-mini-item">
+                <span class="derived-mini-label">Build</span>
+                <span class="derived-mini-val" id="derived-build">—</span>
+              </div>
+            </div>
+          </div>
+
+        </div>
+
+        <div class="insanity-flags">
+          <label class="checkbox-label">
+            <input type="checkbox" id="flag-temp-insanity" />
+            <span>Insanidade Temporária</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="flag-indef-insanity" />
+            <span>Insanidade Indefinida</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="flag-major-wound" />
+            <span>Ferimento Grave</span>
+          </label>
+          <label class="checkbox-label">
+            <input type="checkbox" id="flag-unconscious" />
+            <span>Inconsciente</span>
+          </label>
+        </div>
+      </div>
+    </div>
+
+    <!-- ── TAB: Habilidades ── -->
+    <div class="tab-content" id="tab-skills">
+      <div class="section-card">
+        <div class="skills-header">
+          <h3 class="section-title">Habilidades</h3>
+          <div class="skills-legend">
+            <span class="legend-item occ">OC = Ocupação</span>
+            <span class="legend-item int">IN = Interesse</span>
+            <span class="skills-hint">Clique 🎲 para rolar teste (d100)</span>
+          </div>
+        </div>
+
+        <!-- Pontos de habilidade -->
+        <div class="sp-tracker" id="sp-tracker">
+          <div class="sp-block sp-occ-block">
+            <div class="sp-label">Pontos de Ocupação <span class="sp-formula">(EDU×4)</span></div>
+            <div class="sp-counts">
+              <span class="sp-used" id="sp-occ-used">0</span>
+              <span class="sp-sep">/</span>
+              <span class="sp-total" id="sp-occ-total">0</span>
+              <span class="sp-avail" id="sp-occ-avail">0 disp.</span>
+            </div>
+            <div class="sp-bar-wrap"><div class="sp-bar-fill sp-occ-fill" id="sp-occ-bar"></div></div>
+          </div>
+          <div class="sp-block sp-int-block">
+            <div class="sp-label">Pontos de Interesse <span class="sp-formula">(INT×2)</span></div>
+            <div class="sp-counts">
+              <span class="sp-used" id="sp-int-used">0</span>
+              <span class="sp-sep">/</span>
+              <span class="sp-total" id="sp-int-total">0</span>
+              <span class="sp-avail" id="sp-int-avail">0 disp.</span>
+            </div>
+            <div class="sp-bar-wrap"><div class="sp-bar-fill sp-int-fill" id="sp-int-bar"></div></div>
+          </div>
+        </div>
+
+        <div class="skills-grid" id="skills-grid"></div>
+      </div>
+    </div>
+
+    <!-- ── TAB: Combate ── -->
+    <div class="tab-content" id="tab-combat">
+      <div class="section-card">
+        <div class="card-header-row">
+          <h3 class="section-title">Armas</h3>
+          <button class="btn btn-sm btn-secondary" id="btn-add-weapon">+ Adicionar Arma</button>
+        </div>
+        <div class="weapons-table-wrapper">
+          <table class="weapons-table">
+            <thead><tr>
+              <th>Arma</th><th>Habilidade (%)</th><th>Dano</th><th>Alcance</th>
+              <th>Ataques</th><th>Munição</th><th>Malf.</th><th></th>
+            </tr></thead>
+            <tbody id="weapons-tbody"><tr class="empty-row"><td colspan="8">Nenhuma arma cadastrada</td></tr></tbody>
+          </table>
+        </div>
+      </div>
+      <div class="section-card">
+        <div class="card-header-row">
+          <h3 class="section-title">Equipamentos e Posses</h3>
+          <button class="btn btn-sm btn-secondary" id="btn-add-possession">+ Adicionar Item</button>
+        </div>
+        <ul class="possessions-list" id="possessions-list"><li class="empty-row">Nenhum item</li></ul>
+      </div>
+    </div>
+
+    <!-- ── TAB: Histórico ── -->
+    <div class="tab-content" id="tab-background">
+      <div class="background-grid">
+        <div class="section-card">
+          <h3 class="section-title">Descrição Pessoal</h3>
+          <textarea class="bg-textarea" id="bg-appearance" placeholder="Descrição física..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Ideologia e Crenças</h3>
+          <textarea class="bg-textarea" id="bg-ideology" placeholder="Crenças, religião, filosofia..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Pessoas Significativas</h3>
+          <textarea class="bg-textarea" id="bg-significant-people" placeholder="Quem é importante e por quê..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Locais Significativos</h3>
+          <textarea class="bg-textarea" id="bg-meaningful-locations" placeholder="Lugares especiais..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Posses Preciosas</h3>
+          <textarea class="bg-textarea" id="bg-treasured-possessions" placeholder="Objetos de valor sentimental..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Traços de Personalidade</h3>
+          <textarea class="bg-textarea" id="bg-traits" placeholder="Maneirismos, hábitos..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Ferimentos e Cicatrizes</h3>
+          <textarea class="bg-textarea" id="bg-injuries" placeholder="Sequelas físicas e emocionais..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Fobias e Manias</h3>
+          <textarea class="bg-textarea" id="bg-phobias" placeholder="Medos irracionais, compulsões..."></textarea>
+        </div>
+        <div class="section-card">
+          <h3 class="section-title">Tomos e Artefatos Arcanos</h3>
+          <textarea class="bg-textarea" id="bg-arcane" placeholder="Livros proibidos, feitiços..."></textarea>
+        </div>
+        <div class="section-card bg-full">
+          <h3 class="section-title">História de Fundo</h3>
+          <textarea class="bg-textarea bg-tall" id="bg-backstory" placeholder="A história completa..."></textarea>
+        </div>
+        <div class="section-card bg-full">
+          <h3 class="section-title">Notas da Sessão</h3>
+          <textarea class="bg-textarea bg-tall" id="bg-notes" placeholder="Pistas, NPCs, eventos..."></textarea>
+        </div>
+      </div>
+    </div>
+  </div><!-- /character-sheet -->
+
+  <!-- ── GM View ── -->
+  <div class="gm-view" id="gm-view" style="display:none">
+    <div class="gm-header">
+      <div class="gm-title">
+        <span class="gm-icon">🎭</span>
+        <h2>Vista do Mestre</h2>
+      </div>
+      <div class="gm-tools">
+        <button class="btn btn-sm btn-secondary" id="btn-gm-dice">🎲 Dados</button>
+        <button class="btn btn-sm btn-ghost" id="btn-gm-reload">↻ Atualizar</button>
+        <button class="btn btn-sm btn-ghost" id="btn-gm-close">← Fichas</button>
+      </div>
+    </div>
+    <div class="gm-grid" id="gm-grid">
+      <div class="gm-loading">Carregando investigadores...</div>
+    </div>
+  </div>
+
+</main>
+
+<!-- ═══ MODAL: Rolador de Dados ═══ -->
+<div class="modal-overlay" id="dice-modal">
+  <div class="modal dice-modal">
+    <div class="modal-header">
+      <div>
+        <h2>🎲 Rolador de Dados</h2>
+        <div class="roll-target-display" id="roll-target-display" style="display:none"></div>
+      </div>
+      <button class="modal-close" id="dice-modal-close">✕</button>
+    </div>
+
+    <div class="dice-buttons">
+      <button class="die-btn" data-sides="4">d4</button>
+      <button class="die-btn" data-sides="6">d6</button>
+      <button class="die-btn" data-sides="8">d8</button>
+      <button class="die-btn" data-sides="10">d10</button>
+      <button class="die-btn" data-sides="12">d12</button>
+      <button class="die-btn" data-sides="20">d20</button>
+      <button class="die-btn d100-btn" data-sides="100">d100</button>
+    </div>
+
+    <div class="dice-config">
+      <div class="dice-config-row">
+        <label>Quantidade:</label>
+        <div class="qty-control">
+          <button id="qty-minus">−</button>
+          <span id="qty-display">1</span>
+          <button id="qty-plus">+</button>
+        </div>
+      </div>
+      <div class="dice-config-row">
+        <label>Modificador:</label>
+        <input type="number" id="dice-modifier" value="0" class="mod-input" />
+      </div>
+      <div class="dice-config-row bonus-penalty-row" id="bonus-penalty-area">
+        <label>Bônus / Penalidade:</label>
+        <div class="bp-control">
+          <button class="bp-btn" id="bp-penalty">Penalidade</button>
+          <span id="bp-display">Nenhum</span>
+          <button class="bp-btn" id="bp-bonus">Bônus</button>
+        </div>
+        <button class="btn btn-ghost btn-sm" id="bp-reset">Limpar</button>
+      </div>
+    </div>
+
+    <div class="dice-expression-row">
+      <input type="text" id="dice-expression" class="expr-input" placeholder="Ex: 2d6+3, d100, 4d4..." />
+      <button class="btn btn-primary" id="btn-roll">Rolar!</button>
+    </div>
+
+    <div class="dice-result" id="dice-result">
+      <div class="result-placeholder">Clique em um dado para rolar</div>
+    </div>
+
+    <div class="dice-history-section">
+      <h4>Histórico</h4>
+      <ul class="dice-history" id="dice-history">
+        <li class="empty-row">Nenhuma rolagem ainda</li>
+      </ul>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Novo Personagem ═══ -->
+<div class="modal-overlay" id="new-char-modal">
+  <div class="modal new-char-modal">
+    <div class="modal-header">
+      <h2>Novo Investigador</h2>
+      <button class="modal-close" id="new-char-modal-close">✕</button>
+    </div>
+    <div class="new-char-form">
+      <div class="field-group">
+        <label>Nome do Investigador *</label>
+        <input type="text" id="nc-name" class="field-input" placeholder="Nome completo" />
+      </div>
+      <div class="field-group">
+        <label>Jogador</label>
+        <input type="text" id="nc-player" class="field-input" placeholder="Seu nome" />
+      </div>
+      <div class="field-group">
+        <label>Ocupação</label>
+        <input type="text" id="nc-occupation" class="field-input" placeholder="Ex: Detetive, Professor..." />
+      </div>
+      <div class="new-char-hint">
+        <p>Dica: Role as características após criar (3d6×5 para a maioria, 2d6+6×5 para SIZ e EDU). O cálculo automático atualizará HP, MP e SAN conforme as regras da 7ª edição.</p>
+      </div>
+      <div class="new-char-actions">
+        <button class="btn btn-ghost" id="btn-cancel-new-char">Cancelar</button>
+        <button class="btn btn-primary" id="btn-confirm-new-char">Criar Investigador</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Configurações ═══ -->
+<div class="modal-overlay" id="config-modal">
+  <div class="modal config-modal">
+    <div class="modal-header">
+      <h2>⚙️ Configurações de Regras (CoC 7ª ed.)</h2>
+      <button class="modal-close" id="config-modal-close">✕</button>
+    </div>
+
+    <div class="config-form">
+      <div class="config-section">
+        <h3 class="config-section-title">Cálculo Automático</h3>
+        <label class="toggle-label">
+          <span class="toggle-text">Recalcular HP, MP e Sanidade automaticamente quando as características mudarem</span>
+          <div class="toggle-switch-wrap">
+            <input type="checkbox" id="cfg-auto-calc" class="toggle-input" />
+            <span class="toggle-switch"></span>
+          </div>
+        </label>
+      </div>
+
+      <div class="config-section">
+        <h3 class="config-section-title">Fórmulas de Derivação</h3>
+        <p class="formula-hint">Variáveis disponíveis: <code>STR, DEX, INT, CON, APP, POW, SIZ, EDU, LUCK, AGE</code>. Funções: <code>Math.floor(), Math.ceil(), Math.round(), Math.max(), Math.min()</code>.</p>
+
+        <div class="formula-row">
+          <label class="formula-label">HP Máximo</label>
+          <input type="text" id="cfg-formula-hp" class="formula-input" />
+          <span class="formula-preview" id="prev-hp"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Pontos de Magia (MP) Máximo</label>
+          <input type="text" id="cfg-formula-mp" class="formula-input" />
+          <span class="formula-preview" id="prev-mp"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Sanidade (SAN) Máxima inicial</label>
+          <input type="text" id="cfg-formula-san" class="formula-input" />
+          <span class="formula-preview" id="prev-san"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Base da Habilidade Esquivar</label>
+          <input type="text" id="cfg-formula-dodge" class="formula-input" />
+          <span class="formula-preview" id="prev-dodge"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Base do Idioma Próprio</label>
+          <input type="text" id="cfg-formula-lang-own" class="formula-input" />
+          <span class="formula-preview" id="prev-lang"></span>
+        </div>
+        <div class="formula-row formula-row-wide">
+          <label class="formula-label">Taxa de Movimento (MOV)</label>
+          <input type="text" id="cfg-formula-mov" class="formula-input" />
+          <span class="formula-preview" id="prev-mov"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Pontos de Ocupação (total)</label>
+          <input type="text" id="cfg-formula-occ-points" class="formula-input" />
+          <span class="formula-preview" id="prev-occ-points"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Pontos de Interesse (total)</label>
+          <input type="text" id="cfg-formula-int-points" class="formula-input" />
+          <span class="formula-preview" id="prev-int-points"></span>
+        </div>
+        <div class="formula-row">
+          <label class="formula-label">Base da Luta (Briga/Brawl)</label>
+          <input type="text" id="cfg-formula-brawl" class="formula-input" />
+          <span class="formula-preview" id="prev-brawl"></span>
+        </div>
+      </div>
+
+      <div class="config-actions">
+        <button class="btn btn-ghost" id="cfg-reset">↺ Resetar Padrões</button>
+        <button class="btn btn-secondary" id="cfg-test">⚡ Testar com Personagem Atual</button>
+        <button class="btn btn-primary" id="cfg-save">Salvar</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Evidências ═══ -->
+<div class="modal-overlay" id="evidence-modal">
+  <div class="modal evidence-modal">
+    <div class="modal-header">
+      <h2>🔍 Evidências da Sessão</h2>
+      <button class="modal-close" id="evidence-modal-close">✕</button>
+    </div>
+    <div class="evidence-toolbar">
+      <button class="btn btn-primary btn-sm" id="btn-add-evidence">+ Nova Evidência</button>
+      <span class="evidence-count" id="evidence-count"></span>
+    </div>
+    <div class="evidence-grid" id="evidence-grid">
+      <div class="evidence-empty">Nenhuma evidência registrada ainda.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Livros ═══ -->
+<div class="modal-overlay" id="books-modal">
+  <div class="modal books-modal">
+    <div class="modal-header">
+      <h2>📚 Livros / PDFs</h2>
+      <button class="modal-close" id="books-modal-close">✕</button>
+    </div>
+    <div class="books-toolbar">
+      <label class="btn btn-primary btn-sm" for="book-upload-input">📤 Fazer Upload de PDF</label>
+      <input type="file" id="book-upload-input" accept=".pdf" style="display:none" />
+      <span class="upload-status" id="book-upload-status"></span>
+    </div>
+    <p class="books-hint">Use a busca nativa do navegador (Ctrl+F) dentro do visualizador de livro para pesquisar conteúdo.</p>
+    <div class="books-list" id="books-list">
+      <div class="books-empty">Nenhum PDF enviado ainda.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Visualizador de Livro ═══ -->
+<div class="modal-overlay" id="book-viewer-modal">
+  <div class="modal book-viewer-modal">
+    <div class="modal-header">
+      <h2 id="book-viewer-title">📖 Livro</h2>
+      <button class="modal-close" id="book-viewer-close">✕</button>
+    </div>
+    <iframe id="book-viewer-iframe" src="" title="Visualizador de PDF"></iframe>
+  </div>
+</div>
+
+<script src="app.js"></script>
+</body>
+</html>

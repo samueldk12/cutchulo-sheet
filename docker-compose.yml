@@ -1,0 +1,12 @@
+services:
+  cthulhu:
+    build: .
+    ports:
+      - "3000:3000"
+    volumes:
+      # Persist database and uploaded books between restarts
+      - ./cthulhu.db:/app/cthulhu.db
+      - ./books:/app/books
+    restart: unless-stopped
+    environment:
+      - NODE_ENV=production
