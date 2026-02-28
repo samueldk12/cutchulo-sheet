@@ -1421,9 +1421,14 @@ async function loadBooks() {
   } catch (e) { list.innerHTML = `<div class="books-empty">Erro: ${e.message}</div>`; }
 }
 
-function openBookViewer(filename, page) {
+function openBookViewer(filename, page, searchTerm) {
   $('#book-viewer-title').textContent = `📖 ${filename}${page ? ` — p. ${page}` : ''}`;
-  const src = `/books/${encodeURIComponent(filename)}${page ? '#page=' + page : ''}`;
+  // PDF.js viewer: ?file=URL#page=N&search=term  — opens find bar automatically
+  const fileUrl = `/books/${encodeURIComponent(filename)}`;
+  let hash = '';
+  if (page)       hash += `page=${page}`;
+  if (searchTerm) hash += `${hash ? '&' : ''}search=${encodeURIComponent(searchTerm)}`;
+  const src = `/pdfjs/viewer.html?file=${encodeURIComponent(fileUrl)}${hash ? '#' + hash : ''}`;
   $('#book-viewer-iframe').src = src;
   $('#books-modal').classList.remove('open');
   $('#book-viewer-modal').classList.add('open');
@@ -2996,7 +3001,7 @@ function setupPdfSearch() {
         results.querySelectorAll('.pdf-result-match').forEach(el =>
           el.addEventListener('click', () => {
             const page = el.dataset.page ? parseInt(el.dataset.page) : undefined;
-            openBookViewer(decodeURIComponent(el.dataset.book), page);
+            openBookViewer(decodeURIComponent(el.dataset.book), page, q);
             close();
           })
         );

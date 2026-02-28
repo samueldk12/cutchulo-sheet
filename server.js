@@ -36,6 +36,8 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve uploaded books
 app.use('/books', express.static(BOOKS_DIR, { dotfiles: 'deny' }));
+// Serve PDF.js viewer
+app.use('/pdfjs', express.static(path.join(__dirname, 'public', 'pdfjs')));
 
 // ─── Personagens ─────────────────────────────────────────────
 
