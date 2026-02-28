@@ -6,16 +6,34 @@ Sistema de fichas de personagem para o RPG **Call of Cthulhu 7ª Edição**, com
 
 ## Funcionalidades
 
+### Personagem
 - Criação e gerenciamento de múltiplos investigadores
 - Cálculo automático de HP, MP, Sanidade, MOV e habilidades derivadas (CoC 7e)
-- Pontos de habilidade de ocupação (EDU×4) e interesse (INT×2) com rastreamento em tempo real
+- Retrato do personagem com **visualização em tela cheia** (clique na foto)
+- **Bens e Riqueza**: rastreamento de Dinheiro em Mãos, Nível de Gastos e Patrimônio
+
+### Habilidades (Perícias)
+- 63 habilidades padrão do CoC 7e, incluindo todas as **ciências especializadas** (Biologia, Química, Física, Farmácia, Forense, Geologia, Matemática, Meteorologia, Botânica, Zoologia, Engenharia, Criptografia)
+- **3 campos de input por habilidade**: Pts. Ocupação (OC), Pts. Interesse (IN) e Pts. durante o Jogo (JG)
+- Total calculado automaticamente: Base + OC + IN + JG
+- **Tooltips informativos** em cada habilidade (hover para ver a descrição)
+- Rastreamento de pontos de ocupação (EDU×4) e interesse (INT×2) em tempo real
+
+### Combate
+- **Autocomplete de armas** com 20 armas canônicas do CoC 7e (preenche dano, alcance, munição automaticamente)
+- **Botão de rolar por arma** (busca automaticamente a habilidade correspondente no personagem)
+
+### Compartilhamento
+- **Exportar Amigo**: gera um JSON sem os campos de lore/histórico para compartilhar com o grupo
+- **Modal de Amigos** (👥): visualize fichas resumidas dos outros jogadores (HP/MP/SAN, habilidades top, armas)
+- **Sistema UUID**: cada personagem tem um UUID único; ao importar um personagem existente, ele é **atualizado** em vez de duplicado
+
+### Outros
 - Rolador de dados com dados bônus/penalidade e níveis de sucesso CoC 7e
 - Vista do Mestre com vitais de todos os investigadores
 - Upload de PDFs (livros, módulos) com visualizador integrado e busca nativa
 - Evidências da sessão com imagens, tags e notas
-- Exportação/importação de personagens em JSON
 - Configuração de fórmulas de derivação via interface
-- Retrato do personagem
 
 ---
 
@@ -229,6 +247,87 @@ callofcutchulo/
 
 ---
 
+## Telas e Possibilidades
+
+### Aba Investigador
+```
+┌─────────────────────────────────────────────────────────┐
+│  [Foto]  Nome do Investigador          [Exportar] [👥]  │
+│          Jogador | Ocupação            [Exportar Amigo] │
+├─────────────────────────────────────────────────────────┤
+│  Informações Pessoais: Idade, Gênero, Residência        │
+│                                                         │
+│  Características:                                       │
+│  FOR | DES | INT | CON | APA | POD | TAM | EDU | LUCK  │
+│  (cada uma com Metade, Quinto e botão 🎲 de teste)      │
+│                                                         │
+│  Status Vitais: HP | MP | SAN | MOV                     │
+│  Flags: Insanidade Temp/Indef, Ferimento Grave, Inconsc │
+│                                                         │
+│  💰 Bens e Riqueza:                                     │
+│  Dinheiro em Mãos | Nível de Gastos | Patrimônio        │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Aba Habilidades
+```
+┌─────────────────────────────────────────────────────────┐
+│  Pts. Ocupação (EDU×4): 42/200 ████░░  12 disp.        │
+│  Pts. Interesse (INT×2): 0/100  ░░░░░  100 disp.       │
+├─────────────────────────────────────────────────────────┤
+│  Habilidade          │Base│ OC │ IN │ JG │Total│½/⅕│🎲 │
+│  Accounting (Cont.)  │  5 │ 45 │  0 │  0 │  50 │25/10│🎲│
+│  (hover = tooltip)   │    │    │    │    │     │   │   │
+│  ...63 habilidades...│    │    │    │    │     │   │   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Aba Combate
+```
+┌─────────────────────────────────────────────────────────┐
+│  Armas                                    [+ Adicionar] │
+│  ┌──────────┬──────────┬──────┬────┬─────┬──────┬───┐  │
+│  │ Arma     │ Habili.  │ Dano │Alc.│ Atq │ Mun. │🎲 │  │
+│  │[autocmpl]│[autocmpl]│1d10  │15m │1/2  │  6   │🎲 │  │
+│  └──────────┴──────────┴──────┴────┴─────┴──────┴───┘  │
+│  (datalist com 20 armas canônicas do CoC 7e)            │
+│                                                         │
+│  Equipamentos e Posses                  [+ Adicionar]   │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Modal Amigos (👥)
+```
+┌─────────────────────────────────────────────────────────┐
+│  👥 Personagens dos Amigos    [📥 Importar Amigo]       │
+├─────────────────────────────────────────────────────────┤
+│  ┌──────────────┐  ┌──────────────┐  ┌──────────────┐  │
+│  │ [Foto]  Nome │  │ [Foto]  Nome │  │ [Foto]  Nome │  │
+│  │ Ocupação, XX │  │              │  │              │  │
+│  │ HP ████ 10/10│  │              │  │              │  │
+│  │ SAN ██░ 45/50│  │              │  │              │  │
+│  │ MP ████ 10/10│  │              │  │              │  │
+│  │ Skills top 5 │  │              │  │              │  │
+│  │ 🗡 Armas     │  │              │  │              │  │
+│  └──────────────┘  └──────────────┘  └──────────────┘  │
+└─────────────────────────────────────────────────────────┘
+```
+
+### Fluxo de Exportação/Importação entre Jogadores
+```
+Jogador A                           Jogador B
+┌─────────────┐                    ┌─────────────┐
+│ Ficha do    │ → Exportar Amigo → │ Importar    │
+│ Personagem  │   (sem lore/hist.) │ Amigo (👥)  │
+│ UUID: abc123│   UUID preservado  │             │
+│             │                    │ Ver resumo  │
+│ Atualiza    │ ← Re-importar ←    │ HP/SAN/MP   │
+│ sem duplicar│   mesmo UUID       │ habilidades │
+└─────────────┘                    └─────────────┘
+```
+
+---
+
 ## API resumida
 
 | Método | Rota | Descrição |
@@ -237,8 +336,9 @@ callofcutchulo/
 | `POST` | `/api/characters` | Cria personagem |
 | `PUT` | `/api/characters/:id` | Atualiza personagem |
 | `DELETE` | `/api/characters/:id` | Remove personagem |
-| `GET` | `/api/export/:id` | Exporta personagem como JSON |
-| `POST` | `/api/import` | Importa personagem de JSON |
+| `GET` | `/api/export/:id` | Exporta personagem completo como JSON |
+| `GET` | `/api/export-friend/:id` | Exporta personagem sem lore (versão amigo) |
+| `POST` | `/api/import` | Importa/atualiza personagem via UUID |
 | `GET` | `/api/books` | Lista PDFs enviados |
 | `POST` | `/api/books/upload` | Faz upload de PDF |
 | `DELETE` | `/api/books/:filename` | Remove PDF |
@@ -249,3 +349,19 @@ callofcutchulo/
 | `POST` | `/api/dice/roll` | Rola dados |
 | `GET` | `/api/config` | Configurações de fórmulas |
 | `PUT` | `/api/config` | Salva configurações |
+
+---
+
+## Banco de dados — Estrutura de Habilidades (v3)
+
+O campo de habilidades foi reestruturado para rastrear a origem de cada ponto alocado:
+
+| Campo | Descrição |
+|---|---|
+| `base_value` | Valor base da habilidade (fixo pelo sistema) |
+| `occ_points` | Pontos alocados do pool de Ocupação (EDU×4) |
+| `int_points` | Pontos alocados do pool de Interesse (INT×2) |
+| `game_points` | Pontos ganhos durante o jogo |
+| `value` | Total = base + occ + int + game (calculado automaticamente) |
+
+**Migração automática**: personagens criados em versões anteriores são migrados automaticamente ao iniciar o servidor.

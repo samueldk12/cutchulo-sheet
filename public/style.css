@@ -2013,3 +2013,633 @@ body {
   border-radius: 4px;
   background: #fff;
 }
+
+/* ═══════════════════════════════════════════════════════
+   NOVAS FUNCIONALIDADES — ADIÇÕES
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── Wealth / Gold Section ─── */
+.wealth-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-bottom: 10px;
+}
+.field-group-wide { grid-column: 1 / -1; }
+.wealth-hint {
+  padding: 6px 10px;
+  background: rgba(201,168,76,0.07);
+  border-left: 3px solid var(--gold);
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+}
+
+/* ─── Skills Grid — New 3-input layout ─── */
+.skills-grid-header {
+  display: grid;
+  grid-template-columns: 1fr 44px 44px 44px 44px 50px 48px 24px;
+  gap: 3px;
+  padding: 4px 6px;
+  margin-bottom: 2px;
+  border-bottom: 1px solid var(--border);
+}
+.skills-grid-header span {
+  font-size: 0.62rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--text-muted);
+  text-align: center;
+  font-family: var(--font-display);
+}
+.sgh-name { text-align: left !important; }
+
+/* Override skills-grid for new layout */
+.skills-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.skill-row {
+  display: grid;
+  grid-template-columns: 1fr 44px 44px 44px 44px 50px 48px 24px;
+  gap: 3px;
+  align-items: center;
+  padding: 3px 6px;
+  border-radius: 4px;
+  transition: background 0.15s;
+}
+
+.skill-row:hover { background: rgba(255,255,255,0.04); }
+
+.skill-name {
+  font-size: 0.8rem;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  cursor: help;
+}
+.skill-name:hover { color: var(--text-primary); }
+
+.skill-input {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.78rem;
+  text-align: center;
+  padding: 2px;
+  width: 100%;
+  outline: none;
+}
+.skill-input:focus { border-color: var(--accent); }
+.skill-input.base { color: var(--text-muted); background: transparent; border-color: transparent; }
+.skill-input.total { color: var(--gold); background: transparent; border-color: transparent; font-weight: 700; }
+.skill-input.occ { accent-color: var(--accent-light); border-color: rgba(123,45,139,0.4); }
+.skill-input.occ:focus { border-color: var(--accent); }
+.skill-input.int_ { border-color: rgba(41,128,185,0.4); }
+.skill-input.int_:focus { border-color: var(--blue-light); }
+.skill-input.game { border-color: rgba(39,174,96,0.4); }
+.skill-input.game:focus { border-color: var(--green-light); }
+
+.skill-row.has-occ { background: rgba(123, 45, 139, 0.1); }
+.skill-row.has-int { background: rgba(41, 128, 185, 0.1); }
+.skill-row.has-game { background: rgba(39, 174, 96, 0.08); }
+
+.skill-half-fifth {
+  font-size: 0.65rem;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.skill-roll-btn {
+  background: transparent;
+  border: none;
+  font-size: 0.8rem;
+  cursor: pointer;
+  opacity: 0.3;
+  transition: opacity 0.2s;
+  padding: 0;
+  line-height: 1;
+}
+.skill-roll-btn:hover { opacity: 1; }
+.skill-row:hover .skill-roll-btn { opacity: 0.7; }
+
+/* ─── Skills legend update ─── */
+.legend-item.game {
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-size: 0.7rem;
+  background: rgba(39,174,96,0.15);
+  color: var(--green-light);
+}
+
+/* ─── Weapon Roll Button ─── */
+.btn-weapon-roll {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  transition: all 0.2s;
+  white-space: nowrap;
+}
+.btn-weapon-roll:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(201,168,76,0.1);
+}
+
+/* ─── Portrait Fullscreen Hint ─── */
+.portrait-area { position: relative; }
+.portrait-fullscreen-hint {
+  position: absolute;
+  bottom: 4px;
+  right: 4px;
+  background: rgba(0,0,0,0.7);
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  padding: 2px 4px;
+  border-radius: 3px;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s;
+  display: none;
+}
+.portrait-area:hover .portrait-fullscreen-hint { opacity: 1; }
+
+/* ─── Friends Modal ─── */
+.friends-modal {
+  width: 90vw;
+  max-width: 900px;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+}
+.friends-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 0 4px 12px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 12px;
+  flex-shrink: 0;
+}
+.friends-hint-text {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  font-style: italic;
+}
+.friends-grid {
+  overflow-y: auto;
+  flex: 1;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 12px;
+  padding: 4px;
+}
+.friends-empty {
+  grid-column: 1 / -1;
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 20px;
+  font-style: italic;
+  line-height: 1.8;
+}
+.friend-card {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 14px;
+  display: flex;
+  gap: 12px;
+  transition: border-color 0.2s;
+}
+.friend-card:hover { border-color: var(--accent); }
+.friend-portrait {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  object-fit: cover;
+  flex-shrink: 0;
+  border: 1px solid var(--border);
+}
+.friend-portrait-placeholder {
+  width: 56px;
+  height: 56px;
+  border-radius: 6px;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.4rem;
+  flex-shrink: 0;
+}
+.friend-info { flex: 1; min-width: 0; }
+.friend-name {
+  font-family: var(--font-display);
+  font-size: 0.9rem;
+  color: var(--text-primary);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.friend-sub {
+  font-size: 0.75rem;
+  color: var(--text-muted);
+  margin: 2px 0 6px;
+}
+.friend-vitals { display: flex; flex-direction: column; gap: 3px; margin-bottom: 6px; }
+.fv-item {
+  display: grid;
+  grid-template-columns: 28px 1fr 36px;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.65rem;
+  color: var(--text-muted);
+}
+.fv-bar {
+  height: 4px;
+  background: var(--bg-input);
+  border-radius: 2px;
+  overflow: hidden;
+}
+.fv-fill { height: 100%; border-radius: 2px; transition: width 0.3s; }
+.fv-hp { background: var(--red-light); }
+.fv-san { background: var(--green-light); }
+.fv-mp { background: var(--blue-light); }
+.friend-skills, .friend-weapons {
+  font-size: 0.68rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-top: 2px;
+}
+
+/* ─── Export Friend button ─── */
+#btn-export-friend {
+  display: none;
+}
+.portrait-area:has(#portrait-img[style*="block"]) ~ .sheet-title-area { /* no-op */ }
+
+/* ─── Skills header fixes ─── */
+.skills-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+
+/* ═══════════════════════════════════════════════════════
+   NPCs / INIMIGOS / MONSTROS
+   ═══════════════════════════════════════════════════════ */
+
+/* ─── Modal ─── */
+.npcs-modal {
+  width: 96vw;
+  max-width: 1100px;
+  height: 88vh;
+  display: grid;
+  grid-template-rows: auto auto 1fr;
+  grid-template-columns: 320px 1fr;
+  grid-template-areas:
+    "header  header"
+    "toolbar toolbar"
+    "list    editor";
+  gap: 0;
+}
+.npcs-modal .modal-header { grid-area: header; }
+.npcs-toolbar {
+  grid-area: toolbar;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-darker);
+  flex-wrap: wrap;
+}
+.npcs-filter {
+  display: flex;
+  gap: 4px;
+  margin-left: auto;
+}
+.npc-filter-btn {
+  background: transparent;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-muted);
+  font-size: 0.75rem;
+  padding: 3px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.npc-filter-btn.active, .npc-filter-btn:hover {
+  border-color: var(--gold);
+  color: var(--gold);
+  background: rgba(201,168,76,0.08);
+}
+
+/* Type-specific toolbar buttons */
+.btn-danger-outline {
+  background: transparent;
+  border: 1px solid rgba(192,57,43,0.6);
+  color: #e87070;
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-danger-outline:hover { background: rgba(192,57,43,0.15); }
+.btn-monster {
+  background: rgba(123,45,139,0.15);
+  border: 1px solid rgba(123,45,139,0.5);
+  color: #c087e0;
+  border-radius: var(--radius);
+  padding: 4px 10px;
+  font-size: 0.75rem;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.btn-monster:hover { background: rgba(123,45,139,0.25); }
+
+/* ─── Lista de NPCs ─── */
+.npcs-list {
+  grid-area: list;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px;
+}
+.npcs-empty {
+  text-align: center;
+  color: var(--text-muted);
+  padding: 40px 16px;
+  font-style: italic;
+  font-size: 0.85rem;
+  line-height: 1.6;
+}
+
+/* ─── NPC Cards na lista ─── */
+.npc-card {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 10px;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.npc-card:hover { border-color: var(--accent); background: rgba(123,45,139,0.08); }
+.npc-card.npc-card-selected { border-color: var(--gold); background: rgba(201,168,76,0.07); }
+
+.npc-card-avatar { flex-shrink: 0; }
+.npc-card-img {
+  width: 36px;
+  height: 36px;
+  border-radius: 4px;
+  object-fit: cover;
+  border: 1px solid var(--border);
+}
+.npc-card-icon { font-size: 1.5rem; }
+
+.npc-card-info { flex: 1; min-width: 0; }
+.npc-card-name {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.npc-card-type {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  margin: 1px 0;
+}
+.npc-card-desc {
+  font-size: 0.7rem;
+  color: var(--text-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.npc-card-hp { font-size: 0.68rem; color: var(--text-muted); margin-top: 3px; }
+.npc-hp-bar { height: 3px; background: var(--bg-input); border-radius: 2px; margin-top: 2px; overflow: hidden; }
+.npc-hp-fill { height: 100%; background: var(--red-light); border-radius: 2px; }
+
+/* Type colors */
+.npc-type-npc  { color: #4fc3f7; border-left: 3px solid #4fc3f7 !important; }
+.npc-type-enemy { color: #ef9a9a; border-left: 3px solid #ef9a9a !important; }
+.npc-type-monster { color: #ce93d8; border-left: 3px solid #ce93d8 !important; }
+.npc-card-type.npc-type-npc  { color: #4fc3f7; }
+.npc-card-type.npc-type-enemy { color: #ef9a9a; }
+.npc-card-type.npc-type-monster { color: #ce93d8; }
+
+/* ─── Editor de NPC ─── */
+.npc-editor {
+  grid-area: editor;
+  overflow-y: auto;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.npc-editor-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+.npc-editor-header h3 {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  color: var(--gold);
+}
+
+.npc-id-row {
+  display: flex;
+  gap: 12px;
+  align-items: flex-start;
+}
+.npc-portrait-area {
+  width: 72px;
+  height: 72px;
+  border-radius: 6px;
+  border: 1px dashed var(--border);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  overflow: hidden;
+  background: var(--bg-input);
+  transition: border-color 0.2s;
+}
+.npc-portrait-area:hover { border-color: var(--gold); }
+#npc-portrait-img { width: 100%; height: 100%; object-fit: cover; }
+#npc-portrait-placeholder { font-size: 2rem; }
+.npc-id-fields { flex: 1; display: flex; flex-direction: column; gap: 6px; }
+
+.npc-section-title {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.1em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.npc-stats-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(80px, 1fr));
+  gap: 8px;
+}
+.npc-stat-block {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+}
+.npc-stat-block label {
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+}
+.npc-stat {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--font-display);
+  font-size: 0.88rem;
+  text-align: center;
+  padding: 4px 2px;
+  width: 100%;
+  outline: none;
+}
+.npc-stat:focus { border-color: var(--accent); }
+
+/* Vitais */
+.npc-vitals-row {
+  display: flex;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+.npc-vital-block {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 0.82rem;
+  color: var(--text-secondary);
+}
+.npc-vital-btn {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-primary);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  font-size: 0.9rem;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.npc-vital-btn:hover { border-color: var(--gold); color: var(--gold); }
+.npc-vital-cur { font-weight: 700; color: var(--text-primary); min-width: 20px; text-align: center; }
+.npc-vital-max {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 3px;
+  color: var(--text-muted);
+  font-size: 0.78rem;
+  text-align: center;
+  width: 42px;
+  padding: 2px;
+  outline: none;
+}
+.npc-vital-max:focus { border-color: var(--accent); }
+
+/* Skills (texto livre) */
+.npc-textarea {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.82rem;
+  padding: 8px 10px;
+  resize: vertical;
+  min-height: 60px;
+  outline: none;
+  line-height: 1.5;
+}
+.npc-textarea:focus { border-color: var(--accent); }
+
+/* Ataques */
+.npc-attacks-empty {
+  font-size: 0.78rem;
+  color: var(--text-muted);
+  font-style: italic;
+  padding: 6px 0;
+}
+.npc-attack-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border);
+}
+.npc-atk-field {
+  background: var(--bg-input);
+  border: 1px solid transparent;
+  border-radius: 3px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.8rem;
+  padding: 3px 6px;
+  outline: none;
+  flex: 1;
+  transition: border-color 0.15s;
+}
+.npc-atk-field:focus { border-color: var(--accent); }
+.npc-atk-pct { width: 52px; flex: 0 0 52px; text-align: center; }
+.npc-atk-dmg { width: 80px; flex: 0 0 80px; }
+.npc-atk-notes { color: var(--text-muted); }
+
+/* ─── npc-field (campo genérico dentro do editor) ─── */
+.npc-field {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  color: var(--text-primary);
+  font-family: var(--font-body);
+  font-size: 0.85rem;
+  padding: 5px 8px;
+  outline: none;
+  width: 100%;
+}
+.npc-field:focus { border-color: var(--accent); }
+

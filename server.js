@@ -6,6 +6,7 @@ const {
   initDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
+  npcQueries,
   DEFAULT_CONFIG,
 } = require('./database');
 
@@ -85,7 +86,29 @@ app.get('/api/export/:id', (req, res) => {
     const safeName = (c.name || 'personagem').replace(/[^a-z0-9_\-\s]/gi, '_');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}.json"`);
     res.setHeader('Content-Type', 'application/json');
-    res.json({ version: 2, exportedAt: new Date().toISOString(), character: c });
+    res.json({ version: 3, exportedAt: new Date().toISOString(), character: c });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Export "friend" version — strips lore/background narrative fields
+app.get('/api/export-friend/:id', (req, res) => {
+  try {
+    const c = characterQueries.getById(+req.params.id);
+    if (!c) return res.status(404).json({ error: 'Personagem não encontrado' });
+
+    // Remove narrative/lore fields from friend export
+    const loreFields = [
+      'appearance_desc','ideology','significant_people','meaningful_locations',
+      'treasured_possessions','traits','injuries_scars','phobias_manias',
+      'arcane_tomes','backstory','notes',
+    ];
+    const friendChar = { ...c };
+    loreFields.forEach(f => delete friendChar[f]);
+
+    const safeName = (c.name || 'personagem').replace(/[^a-z0-9_\-\s]/gi, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}_amigo.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ version: 3, exportedAt: new Date().toISOString(), isFriendExport: true, character: friendChar });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -93,12 +116,17 @@ app.post('/api/import', (req, res) => {
   try {
     const { character } = req.body;
     if (!character?.name) return res.status(400).json({ error: 'JSON inválido: campo "character" obrigatório' });
-    // Strip ID so a new one is generated
+
+    // Keep uuid for deduplication but strip local IDs
+    const uuid = character.uuid;
     delete character.id;
     delete character.created_at;
     delete character.updated_at;
+    if (uuid) character.uuid = uuid;
+
     const id = characterQueries.import(character);
-    res.status(201).json(characterQueries.getById(id));
+    const result = characterQueries.getById(id);
+    res.status(201).json({ ...result, wasUpdated: !!uuid && !!characterQueries.getByUuid(uuid) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -271,6 +299,40 @@ app.put('/api/evidence/:id', (req, res) => {
 
 app.delete('/api/evidence/:id', (req, res) => {
   try { evidenceQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── NPCs / Inimigos ─────────────────────────────────────────
+
+app.get('/api/npcs', (req, res) => {
+  try { res.json(npcQueries.listAll()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/npcs/:id', (req, res) => {
+  try {
+    const n = npcQueries.getById(+req.params.id);
+    if (!n) return res.status(404).json({ error: 'NPC não encontrado' });
+    res.json(n);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/npcs', (req, res) => {
+  try {
+    const id = npcQueries.create(req.body);
+    res.status(201).json(npcQueries.getById(id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/npcs/:id', (req, res) => {
+  try {
+    npcQueries.update(+req.params.id, req.body);
+    res.json(npcQueries.getById(+req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/npcs/:id', (req, res) => {
+  try { npcQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
