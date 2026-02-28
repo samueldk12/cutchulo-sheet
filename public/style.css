@@ -2009,7 +2009,7 @@ body {
 /* ═══ BOOK VIEWER MODAL ═══ */
 .book-viewer-modal {
   width: 95vw;
-  max-width: 1100px;
+  max-width: 1400px;
   height: 90vh;
   display: flex;
   flex-direction: column;
@@ -2017,7 +2017,6 @@ body {
 #book-viewer-iframe {
   flex: 1;
   border: none;
-  border-radius: 4px;
   background: #fff;
 }
 
@@ -2869,3 +2868,187 @@ body {
 .btn-monster { background: rgba(89,30,139,0.3); border: 1px solid #5a1e8b; color: var(--text-primary); border-radius: 4px; cursor: pointer; }
 .btn-monster:hover { background: rgba(89,30,139,0.5); }
 
+
+/* ─── Session Status Chip ─── */
+.session-status-chip {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: rgba(123,45,139,0.15);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  cursor: pointer;
+  transition: background 0.2s, border-color 0.2s;
+  font-size: 13px;
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+}
+.session-status-chip:hover { background: rgba(123,45,139,0.3); border-color: var(--accent); }
+.session-status-chip.has-session { border-color: var(--accent); background: rgba(123,45,139,0.25); }
+#session-status-label { flex: 1; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 140px; }
+
+/* ─── Startup Session Overlay ─── */
+.session-startup-modal {
+  width: 520px;
+  max-width: 95vw;
+  max-height: 85vh;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.session-startup-header { padding: 24px 24px 8px; text-align: center; }
+.session-startup-header h2 { font-family: var(--font-display); font-size: 24px; color: var(--accent); margin: 0 0 6px; }
+.session-startup-subtitle { font-size: 14px; color: var(--text-muted); margin: 0; }
+.session-startup-toolbar { padding: 12px 24px; border-bottom: 1px solid var(--border); display: flex; gap: 8px; }
+.session-startup-footer { padding: 12px 24px; border-top: 1px solid var(--border); display: flex; justify-content: flex-end; }
+
+/* ─── GM Sessions Panel ─── */
+.gm-sessions-panel {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+.gm-sessions-left, .gm-sessions-right {
+  padding: 14px 16px;
+}
+.gm-sessions-left { border-right: 1px solid var(--border); }
+.gm-sessions-info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  flex-wrap: wrap;
+}
+.gm-sessions-label { font-size: 12px; font-weight: 700; color: var(--text-secondary); }
+.gm-sessions-name { font-size: 14px; font-weight: 600; color: var(--text-primary); flex: 1; }
+.gm-session-notes-section { display: flex; flex-direction: column; gap: 6px; }
+.gm-session-notes-input {
+  width: 100%;
+  min-height: 80px;
+  resize: vertical;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px;
+  font-size: 13px;
+  font-family: var(--font-body);
+  box-sizing: border-box;
+}
+
+/* ─── GM Session Log ─── */
+.gm-log-header { display: flex; align-items: center; justify-content: space-between; margin-bottom: 8px; }
+.gm-log-form { margin-bottom: 10px; }
+.gm-log-form textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 8px;
+  font-size: 13px;
+  font-family: var(--font-body);
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+.gm-log-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.gm-log-list { display: flex; flex-direction: column; gap: 6px; max-height: 180px; overflow-y: auto; }
+.gm-log-empty { font-size: 13px; color: var(--text-muted); text-align: center; padding: 12px; }
+.gm-log-entry {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 8px 10px;
+  font-size: 13px;
+}
+.gm-log-entry-time { font-size: 11px; color: var(--text-muted); margin-bottom: 4px; }
+.gm-log-entry-text { color: var(--text-primary); line-height: 1.4; white-space: pre-wrap; }
+.gm-log-entry-del { float: right; background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 13px; margin-left: 6px; }
+.gm-log-entry-del:hover { color: var(--danger); }
+
+/* ─── PDF Annotations Panel ─── */
+.book-viewer-body {
+  display: flex;
+  flex: 1;
+  overflow: hidden;
+  min-height: 0;
+}
+.book-viewer-body iframe {
+  flex: 1;
+  min-width: 0;
+  height: 100%;
+  border: none;
+}
+.book-annotations-panel {
+  width: 280px;
+  flex-shrink: 0;
+  border-left: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  background: var(--bg-panel);
+  overflow: hidden;
+}
+.book-annotations-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  flex-shrink: 0;
+}
+.annotation-form {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+}
+.annotation-form-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 13px; }
+.annotation-form-row label { color: var(--text-muted); white-space: nowrap; }
+.annotation-form-row input { background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 4px 6px; }
+.annotation-form textarea {
+  width: 100%;
+  min-height: 70px;
+  resize: vertical;
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  color: var(--text-primary);
+  padding: 6px 8px;
+  font-size: 13px;
+  font-family: var(--font-body);
+  box-sizing: border-box;
+  margin-bottom: 6px;
+}
+.annotation-form-actions { display: flex; gap: 6px; justify-content: flex-end; }
+.annotations-list { flex: 1; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 6px; }
+.annotations-empty { font-size: 13px; color: var(--text-muted); text-align: center; padding: 16px; }
+.annotation-item {
+  background: var(--bg-input);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--accent);
+  border-radius: 6px;
+  padding: 8px 10px;
+  position: relative;
+}
+.annotation-item-page {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  margin-bottom: 4px;
+  cursor: pointer;
+  display: inline-block;
+}
+.annotation-item-page:hover { text-decoration: underline; }
+.annotation-item-text { font-size: 13px; color: var(--text-primary); line-height: 1.4; white-space: pre-wrap; }
+.annotation-item-actions { display: flex; gap: 4px; margin-top: 6px; justify-content: flex-end; }
+.annotation-del-btn { background: none; border: none; color: var(--text-muted); cursor: pointer; font-size: 12px; }
+.annotation-del-btn:hover { color: var(--danger); }
+.annotation-goto-btn { background: none; border: none; color: var(--accent); cursor: pointer; font-size: 12px; }
+.annotation-goto-btn:hover { text-decoration: underline; }

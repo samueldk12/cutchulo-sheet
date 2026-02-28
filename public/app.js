@@ -952,6 +952,8 @@ async function enterGmMode() {
   $('#empty-state').style.display     = 'none';
   $('#gm-view').style.display         = 'block';
   await loadGmView();
+  // Load session log if there's an active session
+  if (sessionState.active) loadGmSessionLog(sessionState.active.id);
 }
 
 function exitGmMode() {
@@ -1431,6 +1433,15 @@ function openBookViewer(filename, page, searchTerm) {
   // Use fileUrl directly (single-encoded) — do NOT wrap in encodeURIComponent again
   const src = `/pdfjs/viewer.html?file=${fileUrl}${hash ? '#' + hash : ''}`;
   $('#book-viewer-iframe').src = src;
+  // Set up annotation state for this file
+  annotationState.filename = filename;
+  annotationState.list = [];
+  // If annotation panel is open, reload annotations for new file
+  if ($('#book-annotations-panel')?.style.display !== 'none') {
+    loadAnnotations(filename);
+  }
+  // Auto-set page in annotation form
+  if (page && $('#ann-page')) $('#ann-page').value = page;
   $('#books-modal').classList.remove('open');
   $('#book-viewer-modal').classList.add('open');
 }
@@ -2064,11 +2075,10 @@ document.addEventListener('DOMContentLoaded', init);
 // SESSÕES
 // ══════════════════════════════════════════════════════════════
 
-const sessionState = { list: [], active: null };
+const sessionState = { list: [], active: null, log: [] };
 
 function setupSessions() {
-  const btn = $('#btn-sessions');
-  if (btn) btn.addEventListener('click', openSessionsModal);
+  // Sessions modal (used from GM view and startup)
   $('#sessions-modal-close')?.addEventListener('click', () => $('#sessions-modal').classList.remove('open'));
   $('#btn-create-session')?.addEventListener('click', () => {
     $('#session-create-form').style.display = 'block';
@@ -2085,8 +2095,109 @@ function setupSessions() {
     if (charGroup) charGroup.style.display = r.value === 'player' ? '' : 'none';
   }));
 
+  // Session status chip — click to open startup overlay
+  $('#session-status-chip')?.addEventListener('click', openSessionStartup);
+
+  // Startup overlay
+  setupSessionStartup();
+
+  // GM view change session button
+  $('#btn-gm-change-session')?.addEventListener('click', openSessionStartup);
+
+  // GM session log
+  $('#btn-gm-log-add')?.addEventListener('click', () => {
+    $('#gm-log-form').style.display = 'block';
+    $('#gm-log-entry').focus();
+  });
+  $('#btn-gm-log-cancel')?.addEventListener('click', () => {
+    $('#gm-log-form').style.display = 'none';
+    $('#gm-log-entry').value = '';
+  });
+  $('#btn-gm-log-save')?.addEventListener('click', saveGmLogEntry);
+
   // Check URL for ?share= param on load
   checkShareParam();
+}
+
+function setupSessionStartup() {
+  // Startup create form
+  $('#btn-startup-create')?.addEventListener('click', () => {
+    $('#startup-create-form').style.display = 'block';
+  });
+  $('#btn-startup-cancel-create')?.addEventListener('click', () => {
+    $('#startup-create-form').style.display = 'none';
+  });
+  $('#btn-startup-confirm')?.addEventListener('click', createAndEnterSessionFromStartup);
+  $('#btn-startup-skip')?.addEventListener('click', () => {
+    $('#session-startup-overlay').style.display = 'none';
+  });
+}
+
+async function openSessionStartup() {
+  try {
+    sessionState.list = await api.get('/api/sessions');
+    renderStartupSessionsList();
+    $('#startup-create-form').style.display = 'none';
+    $('#session-startup-overlay').style.display = 'flex';
+  } catch (e) { console.error(e); }
+}
+
+function renderStartupSessionsList() {
+  const container = $('#startup-sessions-list');
+  if (!container) return;
+  if (!sessionState.list.length) {
+    container.innerHTML = '<div class="sessions-empty">Nenhuma sessão criada ainda.</div>';
+    return;
+  }
+  container.innerHTML = sessionState.list.map(s => `
+    <div class="session-card${s.is_active ? ' session-card-active' : ''}" data-sess-id="${s.id}">
+      <div class="session-card-info">
+        <span class="session-card-icon">${s.role === 'master' ? '🎭' : '🕵️'}</span>
+        <div>
+          <div class="session-card-name">${s.name}</div>
+          <div class="session-card-meta">${s.role === 'master' ? 'Mestre' : 'Jogador'}${s.is_active ? ' · Ativa' : ''}</div>
+        </div>
+      </div>
+      <div class="session-card-actions">
+        <button class="btn btn-sm btn-primary sess-startup-enter-btn" data-sid="${s.id}">Entrar</button>
+        <button class="btn btn-sm btn-danger sess-startup-del-btn" data-sid="${s.id}">✕</button>
+      </div>
+    </div>`).join('');
+
+  container.querySelectorAll('.sess-startup-enter-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const sid = +btn.dataset.sid;
+      await api.put(`/api/sessions/${sid}/activate`, {});
+      const sess = sessionState.list.find(s => s.id === sid);
+      if (sess) { sess.is_active = 1; enterSession(sess); }
+      $('#session-startup-overlay').style.display = 'none';
+    })
+  );
+  container.querySelectorAll('.sess-startup-del-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const sid = +btn.dataset.sid;
+      if (!confirm('Excluir esta sessão?')) return;
+      await api.delete(`/api/sessions/${sid}`);
+      sessionState.list = sessionState.list.filter(s => s.id !== sid);
+      if (sessionState.active?.id === sid) {
+        sessionState.active = null;
+        updateSessionStatusChip(null);
+      }
+      renderStartupSessionsList();
+    })
+  );
+}
+
+async function createAndEnterSessionFromStartup() {
+  const name = $('#startup-sess-name')?.value.trim() || 'Nova Sessão';
+  const role = document.querySelector('input[name="startup-sess-role"]:checked')?.value || 'player';
+  try {
+    const sess = await api.post('/api/sessions', { name, role, character_id: null });
+    sessionState.list = await api.get('/api/sessions');
+    enterSession(sess);
+    $('#session-startup-overlay').style.display = 'none';
+    $('#startup-sess-name').value = '';
+  } catch (e) { alert('Erro ao criar sessão: ' + e.message); }
 }
 
 async function openSessionsModal() {
@@ -2123,29 +2234,101 @@ async function createAndEnterSession() {
 
 function enterSession(sess) {
   sessionState.active = sess;
-  updateSidebarSessionBadge(sess);
+  updateSessionStatusChip(sess);
+  updateGmSessionPanel(sess);
   if (sess.role === 'master') {
     enterGmMode();
+    loadGmSessionLog(sess.id);
   } else if (sess.role === 'player' && sess.character_id) {
     selectCharacter(sess.character_id);
   }
 }
 
-function updateSidebarSessionBadge(sess) {
-  const btn = $('#btn-sessions');
-  if (!btn) return;
+function updateSessionStatusChip(sess) {
+  const chip = $('#session-status-chip');
+  const icon = $('#session-status-icon');
+  const label = $('#session-status-label');
+  if (!chip) return;
   if (sess) {
-    btn.textContent = `🎮 ${sess.name}`;
-    btn.title = `Sessão ativa: ${sess.name} (${sess.role === 'master' ? 'Mestre' : 'Jogador'})`;
-    btn.classList.add('session-active');
+    icon.textContent = sess.role === 'master' ? '🎭' : '🕵️';
+    label.textContent = sess.name;
+    chip.title = `Sessão: ${sess.name} · Clique para trocar`;
+    chip.classList.add('has-session');
   } else {
-    btn.textContent = '🎮 Sessões';
-    btn.removeAttribute('title');
-    btn.classList.remove('session-active');
+    icon.textContent = '🎮';
+    label.textContent = 'Sem sessão';
+    chip.title = 'Clique para selecionar sessão';
+    chip.classList.remove('has-session');
   }
-  // Show session name in GM view
+  // Keep gm-session-name updated too
   const gmName = $('#gm-session-name');
-  if (gmName) gmName.textContent = sess?.name || '';
+  if (gmName) gmName.textContent = sess?.name || 'Nenhuma sessão ativa';
+}
+
+function updateGmSessionPanel(sess) {
+  const gmName = $('#gm-session-name');
+  if (gmName) gmName.textContent = sess?.name || 'Nenhuma sessão ativa';
+  const notes = $('#gm-session-notes');
+  if (notes && sess?.notes) notes.value = sess.notes || '';
+}
+
+async function loadGmSessionLog(sessionId) {
+  try {
+    sessionState.log = await api.get(`/api/sessions/${sessionId}/log`);
+    renderGmSessionLog();
+  } catch (e) { console.error(e); }
+}
+
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function renderGmSessionLog() {
+  const container = $('#gm-log-list');
+  if (!container) return;
+  if (!sessionState.log.length) {
+    container.innerHTML = '<div class="gm-log-empty">Nenhuma entrada no diário ainda.</div>';
+    return;
+  }
+  container.innerHTML = sessionState.log.map(entry => `
+    <div class="gm-log-entry" data-log-id="${entry.id}">
+      <div class="gm-log-entry-time">
+        <button class="gm-log-entry-del" data-lid="${entry.id}" title="Excluir entrada">✕</button>
+        ${formatLogDate(entry.created_at)}
+      </div>
+      <div class="gm-log-entry-text">${escapeHtml(entry.content)}</div>
+    </div>`).join('');
+  container.querySelectorAll('.gm-log-entry-del').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const lid = +btn.dataset.lid;
+      if (!confirm('Excluir esta entrada?')) return;
+      await api.delete(`/api/session-log/${lid}`);
+      sessionState.log = sessionState.log.filter(e => e.id !== lid);
+      renderGmSessionLog();
+    })
+  );
+}
+
+async function saveGmLogEntry() {
+  const content = $('#gm-log-entry')?.value.trim();
+  if (!content || !sessionState.active) return;
+  try {
+    const entry = await api.post(`/api/sessions/${sessionState.active.id}/log`, { content });
+    sessionState.log.unshift(entry);
+    renderGmSessionLog();
+    $('#gm-log-form').style.display = 'none';
+    $('#gm-log-entry').value = '';
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+function formatLogDate(dt) {
+  if (!dt) return '';
+  try {
+    const d = new Date(dt);
+    return d.toLocaleString('pt-BR', { day: '2-digit', month: '2-digit', year: 'numeric', hour: '2-digit', minute: '2-digit' });
+  } catch { return dt; }
 }
 
 function renderSessionsList() {
@@ -2187,11 +2370,107 @@ function renderSessionsList() {
       sessionState.list = sessionState.list.filter(s => s.id !== sid);
       if (sessionState.active?.id === sid) {
         sessionState.active = null;
-        updateSidebarSessionBadge(null);
+        updateSessionStatusChip(null);
       }
       renderSessionsList();
     })
   );
+}
+
+// ─── PDF Annotations ──────────────────────────────────────────
+const annotationState = { filename: null, list: [] };
+
+function setupAnnotations() {
+  $('#btn-toggle-annotations')?.addEventListener('click', () => {
+    const panel = $('#book-annotations-panel');
+    if (!panel) return;
+    const visible = panel.style.display !== 'none';
+    panel.style.display = visible ? 'none' : 'flex';
+    panel.style.flexDirection = 'column';
+    if (!visible && annotationState.filename) loadAnnotations(annotationState.filename);
+  });
+
+  $('#btn-add-annotation')?.addEventListener('click', () => {
+    $('#annotation-form').style.display = 'block';
+    $('#ann-note').focus();
+  });
+  $('#btn-cancel-annotation')?.addEventListener('click', () => {
+    $('#annotation-form').style.display = 'none';
+    $('#ann-note').value = '';
+  });
+  $('#btn-save-annotation')?.addEventListener('click', saveAnnotation);
+  $('#book-viewer-close')?.addEventListener('click', () => {
+    // Reset annotation state when viewer closes
+    $('#book-annotations-panel').style.display = 'none';
+    $('#annotation-form').style.display = 'none';
+    annotationState.filename = null;
+    annotationState.list = [];
+  });
+}
+
+async function loadAnnotations(filename) {
+  try {
+    annotationState.list = await api.get(`/api/pdf-annotations?filename=${encodeURIComponent(filename)}`);
+    renderAnnotations();
+  } catch (e) { console.error(e); }
+}
+
+function renderAnnotations() {
+  const container = $('#annotations-list');
+  if (!container) return;
+  if (!annotationState.list.length) {
+    container.innerHTML = '<div class="annotations-empty">Nenhuma anotação ainda. Clique em "+ Nova" para adicionar.</div>';
+    return;
+  }
+  container.innerHTML = annotationState.list.map(a => `
+    <div class="annotation-item" data-ann-id="${a.id}">
+      <div class="annotation-item-page" data-page="${a.page}">📄 Página ${a.page}</div>
+      <div class="annotation-item-text">${escapeHtml(a.note)}</div>
+      <div class="annotation-item-actions">
+        <button class="annotation-goto-btn" data-page="${a.page}" title="Ir para esta página">↗ Ir</button>
+        <button class="annotation-del-btn" data-aid="${a.id}" title="Excluir">✕</button>
+      </div>
+    </div>`).join('');
+
+  container.querySelectorAll('.annotation-goto-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const page = +btn.dataset.page;
+      if (annotationState.filename) {
+        const iframe = $('#book-viewer-iframe');
+        if (iframe && iframe.src) {
+          const url = new URL(iframe.src);
+          const fileParam = url.searchParams.get('file');
+          if (fileParam) {
+            iframe.src = `/pdfjs/viewer.html?file=${fileParam}#page=${page}`;
+          }
+        }
+      }
+    })
+  );
+
+  container.querySelectorAll('.annotation-del-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const aid = +btn.dataset.aid;
+      if (!confirm('Excluir esta anotação?')) return;
+      await api.delete(`/api/pdf-annotations/${aid}`);
+      annotationState.list = annotationState.list.filter(a => a.id !== aid);
+      renderAnnotations();
+    })
+  );
+}
+
+async function saveAnnotation() {
+  const note = $('#ann-note')?.value.trim();
+  const page = +$('#ann-page')?.value || 1;
+  if (!note || !annotationState.filename) return;
+  try {
+    const ann = await api.post('/api/pdf-annotations', { filename: annotationState.filename, page, note });
+    annotationState.list.push(ann);
+    annotationState.list.sort((a, b) => a.page - b.page || 0);
+    renderAnnotations();
+    $('#annotation-form').style.display = 'none';
+    $('#ann-note').value = '';
+  } catch (e) { alert('Erro: ' + e.message); }
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2760,6 +3039,7 @@ function setupGmEnhancements() {
   $('#gm-session-notes')?.addEventListener('input', debounce(async () => {
     if (!sessionState.active) return;
     await api.put(`/api/sessions/${sessionState.active.id}`, { notes: $('#gm-session-notes').value });
+    if (sessionState.active) sessionState.active.notes = $('#gm-session-notes').value;
   }, 800));
 }
 
@@ -2923,6 +3203,7 @@ async function init() {
   setupFriends();
   setupNpcs();
   setupSessions();
+  setupAnnotations();
   setupWeaponCatalog();
   setupShareLink();
   setupCreditRating();
@@ -2935,10 +3216,19 @@ async function init() {
     catalogState.list = await api.get('/api/weapon-catalog');
     rebuildWeaponDatalist();
   } catch (e) {}
-  // Restore active session
+  // Restore active session or show startup overlay
   try {
     const active = await api.get('/api/sessions/active');
-    if (active) { sessionState.active = active; updateSidebarSessionBadge(active); }
+    if (active) {
+      sessionState.active = active;
+      updateSessionStatusChip(active);
+      updateGmSessionPanel(active);
+      // Pre-load session log so it's ready when GM view is opened
+      if (active.role === 'master') loadGmSessionLog(active.id);
+    } else {
+      // No active session — show startup overlay after short delay
+      setTimeout(() => openSessionStartup(), 600);
+    }
   } catch (e) {}
   // Populate weapon presets datalist (built-in)
   const dl = $('#weapon-presets');

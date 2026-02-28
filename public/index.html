@@ -33,7 +33,10 @@
   </div>
 
   <div class="sidebar-bottom">
-    <button class="sidebar-action-btn sidebar-sessions-btn" id="btn-sessions">🎮 Sessões</button>
+    <div class="session-status-chip" id="session-status-chip" title="Clique para selecionar sessão">
+      <span id="session-status-icon">🎮</span>
+      <span id="session-status-label">Sem sessão</span>
+    </div>
     <button class="sidebar-action-btn" id="btn-gm-view">🎭 Vista do Mestre</button>
     <button class="sidebar-action-btn" id="btn-npcs">👹 NPCs / Inimigos</button>
     <button class="sidebar-action-btn" id="btn-books">📚 Livros / PDFs</button>
@@ -466,7 +469,6 @@
       <div class="gm-title">
         <span class="gm-icon">🎭</span>
         <h2>Vista do Mestre</h2>
-        <span class="gm-session-name" id="gm-session-name"></span>
       </div>
       <div class="gm-tools">
         <button class="btn btn-sm btn-secondary" id="btn-gm-dice">🎲 Dados</button>
@@ -477,6 +479,38 @@
         <button class="btn btn-sm btn-ghost" id="btn-gm-close">← Fichas</button>
       </div>
     </div>
+
+    <!-- GM Sessions Panel -->
+    <div class="gm-sessions-panel" id="gm-sessions-panel">
+      <div class="gm-sessions-left">
+        <div class="gm-sessions-info">
+          <span class="gm-sessions-label">🎮 Sessão Atual:</span>
+          <span class="gm-sessions-name" id="gm-session-name">Nenhuma sessão ativa</span>
+          <button class="btn btn-sm btn-ghost" id="btn-gm-change-session">Trocar / Criar</button>
+        </div>
+        <div class="gm-session-notes-section">
+          <div class="gm-quick-title">📝 Notas da Sessão</div>
+          <textarea class="gm-session-notes-input" id="gm-session-notes" placeholder="Notas rápidas desta sessão..."></textarea>
+        </div>
+      </div>
+      <div class="gm-sessions-right">
+        <div class="gm-log-header">
+          <span class="gm-quick-title">📖 Diário da Sessão</span>
+          <button class="btn btn-sm btn-primary" id="btn-gm-log-add">+ Adicionar Entrada</button>
+        </div>
+        <div class="gm-log-form" id="gm-log-form" style="display:none">
+          <textarea id="gm-log-entry" placeholder="O que aconteceu nesta sessão?..."></textarea>
+          <div class="gm-log-form-actions">
+            <button class="btn btn-sm btn-ghost" id="btn-gm-log-cancel">Cancelar</button>
+            <button class="btn btn-sm btn-primary" id="btn-gm-log-save">Salvar</button>
+          </div>
+        </div>
+        <div class="gm-log-list" id="gm-log-list">
+          <div class="gm-log-empty">Nenhuma entrada no diário ainda.</div>
+        </div>
+      </div>
+    </div>
+
     <!-- GM Quick Panel -->
     <div class="gm-quick-panel" id="gm-quick-panel">
       <div class="gm-quick-section">
@@ -486,10 +520,6 @@
           <button class="btn btn-sm btn-ghost" id="btn-gm-roll-san">Teste de SAN (grupo)</button>
           <button class="btn btn-sm btn-ghost" id="btn-gm-reset-vitals">Restaurar HP/MP (todos)</button>
         </div>
-      </div>
-      <div class="gm-session-notes-section">
-        <div class="gm-quick-title">📝 Notas da Sessão</div>
-        <textarea class="gm-session-notes-input" id="gm-session-notes" placeholder="Anotações do mestre para esta sessão..."></textarea>
       </div>
     </div>
     <!-- Bulk damage modal -->
@@ -737,9 +767,32 @@
   <div class="modal book-viewer-modal">
     <div class="modal-header">
       <h2 id="book-viewer-title">📖 Livro</h2>
+      <button class="btn btn-sm btn-ghost" id="btn-toggle-annotations" title="Mostrar/Ocultar Anotações">📌 Anotações</button>
       <button class="modal-close" id="book-viewer-close">✕</button>
     </div>
-    <iframe id="book-viewer-iframe" src="" title="Visualizador de PDF"></iframe>
+    <div class="book-viewer-body">
+      <iframe id="book-viewer-iframe" src="" title="Visualizador de PDF"></iframe>
+      <div class="book-annotations-panel" id="book-annotations-panel" style="display:none">
+        <div class="book-annotations-header">
+          <span>📌 Anotações</span>
+          <button class="btn btn-sm btn-primary" id="btn-add-annotation">+ Nova</button>
+        </div>
+        <div class="annotation-form" id="annotation-form" style="display:none">
+          <div class="annotation-form-row">
+            <label>Página</label>
+            <input type="number" id="ann-page" min="1" value="1" style="width:70px" />
+          </div>
+          <textarea id="ann-note" placeholder="Escreva sua anotação..."></textarea>
+          <div class="annotation-form-actions">
+            <button class="btn btn-sm btn-ghost" id="btn-cancel-annotation">Cancelar</button>
+            <button class="btn btn-sm btn-primary" id="btn-save-annotation">Salvar</button>
+          </div>
+        </div>
+        <div class="annotations-list" id="annotations-list">
+          <div class="annotations-empty">Nenhuma anotação ainda.</div>
+        </div>
+      </div>
+    </div>
   </div>
 </div>
 
@@ -951,6 +1004,58 @@
     <!-- Lista de sessões existentes -->
     <div class="sessions-list" id="sessions-list">
       <div class="sessions-empty">Nenhuma sessão criada. Crie uma sessão para organizar seu jogo.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ OVERLAY: Seleção de Sessão (Startup) ═══ -->
+<div class="modal-overlay" id="session-startup-overlay" style="display:none">
+  <div class="modal session-startup-modal">
+    <div class="session-startup-header">
+      <h2>🐙 Call of Cthulhu</h2>
+      <p class="session-startup-subtitle">Selecione ou crie uma sessão para organizar seu jogo</p>
+    </div>
+    <div class="session-startup-toolbar">
+      <button class="btn btn-primary btn-sm" id="btn-startup-create">+ Nova Sessão</button>
+    </div>
+    <div class="session-create-form" id="startup-create-form" style="display:none">
+      <div class="session-form-inner">
+        <div class="field-group">
+          <label>Nome da Sessão</label>
+          <input type="text" id="startup-sess-name" class="field-input" placeholder="Ex: A Máscara de Nyarlathotep - Sessão 1" />
+        </div>
+        <div class="field-group">
+          <label>Seu Papel</label>
+          <div class="sess-role-picker">
+            <label class="sess-role-opt">
+              <input type="radio" name="startup-sess-role" value="master" id="startup-role-master" />
+              <span class="sess-role-card">
+                <span class="sess-role-icon">🎭</span>
+                <span class="sess-role-label">Mestre</span>
+                <span class="sess-role-desc">Controle total da mesa</span>
+              </span>
+            </label>
+            <label class="sess-role-opt">
+              <input type="radio" name="startup-sess-role" value="player" id="startup-role-player" checked />
+              <span class="sess-role-card">
+                <span class="sess-role-icon">🕵️</span>
+                <span class="sess-role-label">Jogador</span>
+                <span class="sess-role-desc">Ficha do seu personagem</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="session-form-actions">
+          <button class="btn btn-ghost" id="btn-startup-cancel-create">Cancelar</button>
+          <button class="btn btn-primary" id="btn-startup-confirm">Criar e Entrar</button>
+        </div>
+      </div>
+    </div>
+    <div class="sessions-list" id="startup-sessions-list">
+      <div class="sessions-empty">Nenhuma sessão criada ainda. Crie uma sessão acima.</div>
+    </div>
+    <div class="session-startup-footer">
+      <button class="btn btn-ghost btn-sm" id="btn-startup-skip">Entrar sem sessão</button>
     </div>
   </div>
 </div>

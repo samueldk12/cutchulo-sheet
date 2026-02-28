@@ -8,6 +8,7 @@ const {
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
   npcQueries, weaponCatalogQueries, sessionQueries,
+  sessionLogQueries, annotationQueries,
   DEFAULT_CONFIG,
 } = require('./database');
 
@@ -568,6 +569,50 @@ app.put('/api/sessions/:id/activate', (req, res) => {
 
 app.delete('/api/sessions/:id', (req, res) => {
   try { sessionQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Session Log ──────────────────────────────────────────────
+app.get('/api/sessions/:id/log', (req, res) => {
+  try { res.json(sessionLogQueries.list(+req.params.id)); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions/:id/log', (req, res) => {
+  try {
+    const id = sessionLogQueries.create(+req.params.id, req.body.content || '');
+    res.status(201).json({ id, session_id: +req.params.id, content: req.body.content || '', created_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/session-log/:id', (req, res) => {
+  try { sessionLogQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── PDF Annotations ──────────────────────────────────────────
+app.get('/api/pdf-annotations', (req, res) => {
+  try {
+    const filename = req.query.filename;
+    if (!filename) return res.status(400).json({ error: 'filename required' });
+    res.json(annotationQueries.list(filename));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/pdf-annotations', (req, res) => {
+  try {
+    const id = annotationQueries.create(req.body);
+    res.status(201).json({ id, ...req.body, created_at: new Date().toISOString() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/pdf-annotations/:id', (req, res) => {
+  try { annotationQueries.update(+req.params.id, req.body); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/pdf-annotations/:id', (req, res) => {
+  try { annotationQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 

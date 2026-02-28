@@ -87,6 +87,22 @@ function initSchema() {
       updated_at TEXT DEFAULT (datetime('now'))
     );
 
+    CREATE TABLE IF NOT EXISTS session_log_entries (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      session_id INTEGER NOT NULL,
+      content TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS pdf_annotations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      filename TEXT NOT NULL,
+      page INTEGER DEFAULT 1,
+      note TEXT DEFAULT '',
+      color TEXT DEFAULT 'yellow',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       uuid TEXT DEFAULT '',
@@ -820,10 +836,50 @@ const npcQueries = {
   },
 };
 
+// ─── Session Log Queries ──────────────────────────────────────
+const sessionLogQueries = {
+  list(sessionId) {
+    return query('SELECT * FROM session_log_entries WHERE session_id = ? ORDER BY created_at DESC', [sessionId]);
+  },
+  create(sessionId, content) {
+    db.run('INSERT INTO session_log_entries (session_id, content) VALUES (?,?)', [sessionId, content]);
+    const id = lastInsertId(); saveDb(); return id;
+  },
+  delete(id) {
+    db.run('DELETE FROM session_log_entries WHERE id = ?', [id]);
+    saveDb();
+  },
+};
+
+// ─── PDF Annotation Queries ───────────────────────────────────
+const annotationQueries = {
+  list(filename) {
+    return query('SELECT * FROM pdf_annotations WHERE filename = ? ORDER BY page, created_at', [filename]);
+  },
+  create(data) {
+    db.run('INSERT INTO pdf_annotations (filename, page, note, color) VALUES (?,?,?,?)',
+      [data.filename, data.page || 1, data.note || '', data.color || 'yellow']);
+    const id = lastInsertId(); saveDb(); return id;
+  },
+  update(id, data) {
+    const allowed = ['note', 'color', 'page'];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+    if (!fields.length) return;
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    db.run(`UPDATE pdf_annotations SET ${setClause} WHERE id = ?`, [...fields.map(f => data[f]), id]);
+    saveDb();
+  },
+  delete(id) {
+    db.run('DELETE FROM pdf_annotations WHERE id = ?', [id]);
+    saveDb();
+  },
+};
+
 module.exports = {
   initDb, getDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
   npcQueries, weaponCatalogQueries, sessionQueries,
+  sessionLogQueries, annotationQueries,
   DEFAULT_CONFIG,
 };
