@@ -199,21 +199,7 @@ function cocSuccessLevel(roll, targetValue) {
 }
 
 // ─── Init ─────────────────────────────────────────────────────
-async function init() {
-  await Promise.all([loadCharacters(), loadConfig()]);
-  setupEventListeners();
-  setupDiceRoller();
-  setupGmView();
-  setupConfigPage();
-  setupPortrait();
-  setupBooks();
-  setupEvidence();
-  setupFriends();
-  setupNpcs();
-  // Populate weapon presets datalist
-  const dl = $('#weapon-presets');
-  if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
-}
+// (overridden at bottom of file with extended version)
 
 async function loadConfig() {
   try {
@@ -616,9 +602,9 @@ function renderWeapons() {
       api.put(`/api/weapons/${wId}`, data).then(() => showSaveIndicator()).catch(console.error);
     };
 
-    // Autocomplete: when name matches a preset, auto-fill fields
+    // Autocomplete: when name matches a preset or catalog weapon, auto-fill fields
     nameInput.addEventListener('change', () => {
-      const preset = WEAPON_PRESETS.find(p => p.name === nameInput.value);
+      const preset = getCatalogWeaponPreset(nameInput.value);
       if (preset) {
         row.querySelector('[data-field="skill"]').value             = preset.skill;
         row.querySelector('[data-field="damage"]').value            = preset.damage;
@@ -770,10 +756,16 @@ function setupEventListeners() {
       const charData = parsed.character || parsed; // accept both formats
       if (!charData.name) { alert('JSON inválido: campo "name" não encontrado'); return; }
       const imported = await api.post('/api/import', { character: charData });
-      state.characters.unshift({ id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age });
+      const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+      const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+      if (existingIdx >= 0) {
+        state.characters[existingIdx] = entry;
+      } else {
+        state.characters.unshift(entry);
+      }
       renderCharacterList();
       await selectCharacter(imported.id);
-      alert(`"${imported.name}" importado com sucesso!`);
+      alert(`"${imported.name}" ${imported.wasUpdated ? 'atualizado' : 'importado'} com sucesso!`);
     } catch (e) { alert('Erro ao importar: ' + e.message); }
     e.target.value = '';
   });
@@ -1993,11 +1985,648 @@ async function loadFriendCharacters() {
   } catch (e) { console.error(e); }
 }
 
+// renderFriendCharacters is defined later with enhanced version
+
+// ─── Bootstrap ────────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', init);
+
+// ══════════════════════════════════════════════════════════════
+// SESSÕES
+// ══════════════════════════════════════════════════════════════
+
+const sessionState = { list: [], active: null };
+
+function setupSessions() {
+  const btn = $('#btn-sessions');
+  if (btn) btn.addEventListener('click', openSessionsModal);
+  $('#sessions-modal-close')?.addEventListener('click', () => $('#sessions-modal').classList.remove('open'));
+  $('#btn-create-session')?.addEventListener('click', () => {
+    $('#session-create-form').style.display = 'block';
+    populateSessionCharSelect();
+  });
+  $('#btn-cancel-session')?.addEventListener('click', () => {
+    $('#session-create-form').style.display = 'none';
+  });
+  $('#btn-confirm-session')?.addEventListener('click', createAndEnterSession);
+
+  // Show/hide character select based on role
+  $$('input[name="sess-role"]').forEach(r => r.addEventListener('change', () => {
+    const charGroup = $('#sess-char-group');
+    if (charGroup) charGroup.style.display = r.value === 'player' ? '' : 'none';
+  }));
+
+  // Check URL for ?share= param on load
+  checkShareParam();
+}
+
+async function openSessionsModal() {
+  try {
+    sessionState.list = await api.get('/api/sessions');
+    sessionState.active = await api.get('/api/sessions/active');
+    renderSessionsList();
+    $('#session-create-form').style.display = 'none';
+    $('#sessions-modal').classList.add('open');
+  } catch (e) { console.error(e); }
+}
+
+function populateSessionCharSelect() {
+  const sel = $('#sess-character');
+  if (!sel) return;
+  sel.innerHTML = '<option value="">— Escolher depois —</option>' +
+    state.characters.map(c => `<option value="${c.id}">${c.name}${c.occupation ? ` (${c.occupation})` : ''}</option>`).join('');
+}
+
+async function createAndEnterSession() {
+  const name = $('#sess-name').value.trim() || 'Nova Sessão';
+  const role = document.querySelector('input[name="sess-role"]:checked')?.value || 'player';
+  const characterId = role === 'player' ? (+$('#sess-character').value || null) : null;
+  try {
+    const sess = await api.post('/api/sessions', { name, role, character_id: characterId });
+    sessionState.active = sess;
+    sessionState.list = await api.get('/api/sessions');
+    renderSessionsList();
+    $('#session-create-form').style.display = 'none';
+    enterSession(sess);
+    $('#sessions-modal').classList.remove('open');
+  } catch (e) { alert('Erro ao criar sessão: ' + e.message); }
+}
+
+function enterSession(sess) {
+  sessionState.active = sess;
+  updateSidebarSessionBadge(sess);
+  if (sess.role === 'master') {
+    enterGmMode();
+  } else if (sess.role === 'player' && sess.character_id) {
+    selectCharacter(sess.character_id);
+  }
+}
+
+function updateSidebarSessionBadge(sess) {
+  const btn = $('#btn-sessions');
+  if (!btn) return;
+  if (sess) {
+    btn.textContent = `🎮 ${sess.name}`;
+    btn.title = `Sessão ativa: ${sess.name} (${sess.role === 'master' ? 'Mestre' : 'Jogador'})`;
+    btn.classList.add('session-active');
+  } else {
+    btn.textContent = '🎮 Sessões';
+    btn.removeAttribute('title');
+    btn.classList.remove('session-active');
+  }
+  // Show session name in GM view
+  const gmName = $('#gm-session-name');
+  if (gmName) gmName.textContent = sess?.name || '';
+}
+
+function renderSessionsList() {
+  const container = $('#sessions-list');
+  if (!container) return;
+  if (!sessionState.list.length) {
+    container.innerHTML = '<div class="sessions-empty">Nenhuma sessão criada ainda.</div>';
+    return;
+  }
+  container.innerHTML = sessionState.list.map(s => `
+    <div class="session-card${s.is_active ? ' session-card-active' : ''}" data-sess-id="${s.id}">
+      <div class="session-card-info">
+        <span class="session-card-icon">${s.role === 'master' ? '🎭' : '🕵️'}</span>
+        <div>
+          <div class="session-card-name">${s.name}</div>
+          <div class="session-card-meta">${s.role === 'master' ? 'Mestre' : 'Jogador'}${s.is_active ? ' · Ativa' : ''}</div>
+        </div>
+      </div>
+      <div class="session-card-actions">
+        <button class="btn btn-sm btn-primary sess-enter-btn" data-sid="${s.id}">Entrar</button>
+        <button class="btn btn-sm btn-danger sess-del-btn" data-sid="${s.id}">✕</button>
+      </div>
+    </div>`).join('');
+
+  container.querySelectorAll('.sess-enter-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const sid = +btn.dataset.sid;
+      await api.put(`/api/sessions/${sid}/activate`, {});
+      const sess = sessionState.list.find(s => s.id === sid);
+      if (sess) { sess.is_active = 1; enterSession(sess); }
+      $('#sessions-modal').classList.remove('open');
+    })
+  );
+  container.querySelectorAll('.sess-del-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const sid = +btn.dataset.sid;
+      if (!confirm('Excluir esta sessão?')) return;
+      await api.delete(`/api/sessions/${sid}`);
+      sessionState.list = sessionState.list.filter(s => s.id !== sid);
+      if (sessionState.active?.id === sid) {
+        sessionState.active = null;
+        updateSidebarSessionBadge(null);
+      }
+      renderSessionsList();
+    })
+  );
+}
+
+// ══════════════════════════════════════════════════════════════
+// CATÁLOGO DE ARMAS
+// ══════════════════════════════════════════════════════════════
+
+const catalogState = { list: [], editingId: null, filter: 'all', search: '' };
+
+function setupWeaponCatalog() {
+  const btn = $('#btn-weapon-catalog');
+  if (btn) btn.addEventListener('click', openCatalogModal);
+  $('#weapon-catalog-modal-close')?.addEventListener('click', () => $('#weapon-catalog-modal').classList.remove('open'));
+
+  $('#btn-catalog-add')?.addEventListener('click', () => openCatalogForm(null));
+  $('#btn-catalog-cancel')?.addEventListener('click', closeCatalogForm);
+  $('#btn-catalog-save')?.addEventListener('click', saveCatalogWeapon);
+
+  $('#btn-catalog-export')?.addEventListener('click', async () => {
+    const resp = await fetch('/api/weapon-catalog/export');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'weapon_catalog.json'; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $('#catalog-import-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const weapons = data.weapons || data;
+      await api.post('/api/weapon-catalog/import', { weapons });
+      catalogState.list = await api.get('/api/weapon-catalog');
+      renderCatalogTable();
+      alert(`${weapons.length} armas importadas/atualizadas!`);
+    } catch (err) { alert('Erro ao importar: ' + err.message); }
+    e.target.value = '';
+  });
+
+  $('#catalog-filter-cat')?.addEventListener('change', e => { catalogState.filter = e.target.value; renderCatalogTable(); });
+  $('#catalog-search')?.addEventListener('input', e => { catalogState.search = e.target.value.toLowerCase(); renderCatalogTable(); });
+}
+
+async function openCatalogModal() {
+  try {
+    catalogState.list = await api.get('/api/weapon-catalog');
+    closeCatalogForm();
+    renderCatalogTable();
+    $('#weapon-catalog-modal').classList.add('open');
+  } catch (e) { alert('Erro: ' + e.message); }
+}
+
+function openCatalogForm(weapon) {
+  catalogState.editingId = weapon?.id || null;
+  const form = $('#catalog-form');
+  if (!form) return;
+  form.style.display = 'block';
+  $('#cat-name').value        = weapon?.name || '';
+  $('#cat-category').value    = weapon?.category || 'other';
+  $('#cat-skill').value       = weapon?.skill || '';
+  $('#cat-damage').value      = weapon?.damage || '';
+  $('#cat-range').value       = weapon?.range || '';
+  $('#cat-apr').value         = weapon?.attacks_per_round || '1';
+  $('#cat-ammo').value        = weapon?.ammo ?? 0;
+  $('#cat-malfunction').value = weapon?.malfunction ?? 100;
+  $('#cat-notes').value       = weapon?.notes || '';
+  $('#cat-name').focus();
+}
+
+function closeCatalogForm() {
+  const form = $('#catalog-form');
+  if (form) form.style.display = 'none';
+  catalogState.editingId = null;
+}
+
+async function saveCatalogWeapon() {
+  const name = $('#cat-name').value.trim();
+  if (!name) { alert('Informe o nome da arma'); return; }
+  const data = {
+    name, category: $('#cat-category').value,
+    skill: $('#cat-skill').value, damage: $('#cat-damage').value,
+    range: $('#cat-range').value, attacks_per_round: $('#cat-apr').value,
+    ammo: +$('#cat-ammo').value || 0, malfunction: +$('#cat-malfunction').value || 100,
+    notes: $('#cat-notes').value,
+  };
+  try {
+    if (catalogState.editingId) {
+      await api.put(`/api/weapon-catalog/${catalogState.editingId}`, data);
+      const idx = catalogState.list.findIndex(w => w.id === catalogState.editingId);
+      if (idx >= 0) catalogState.list[idx] = { ...catalogState.list[idx], ...data };
+    } else {
+      const created = await api.post('/api/weapon-catalog', data);
+      catalogState.list.unshift(created);
+    }
+    closeCatalogForm();
+    renderCatalogTable();
+    // Also update the weapon-presets datalist
+    rebuildWeaponDatalist();
+  } catch (e) { alert('Erro ao salvar: ' + e.message); }
+}
+
+// Map WEAPON_PRESET skill to catalog category
+function _presetCategory(skill) {
+  if (!skill) return 'other';
+  if (skill.includes('Brawl') || skill.includes('Fighting')) return 'melee';
+  if (skill.includes('Handgun') || skill.includes('Pistola')) return 'handgun';
+  if (skill.includes('Rifle') || skill.includes('Shotgun')) return 'rifle';
+  if (skill.includes('Submachine') || skill.includes('SMG') || skill.includes('Submetralhadora')) return 'smg';
+  if (skill.includes('Demolitions') || skill.includes('Throw') || skill.includes('Arremesso')) return 'explosive';
+  return 'other';
+}
+
+function renderCatalogTable() {
+  const tbody = $('#catalog-tbody');
+  if (!tbody) return;
+  const countEl = $('#catalog-count');
+
+  // Built-in presets (shown as read-only), skip ones already overridden in catalog
+  const catalogNames = new Set(catalogState.list.map(w => w.name));
+  const builtins = WEAPON_PRESETS
+    .filter(p => !catalogNames.has(p.name))
+    .map(p => ({ ...p, _builtin: true, category: _presetCategory(p.skill) }));
+
+  // Merge: user catalog first, then built-ins
+  const allWeapons = [...catalogState.list, ...builtins];
+  const search = catalogState.search;
+  const filter = catalogState.filter;
+
+  let filtered = allWeapons;
+  if (filter !== 'all') filtered = filtered.filter(w => w.category === filter);
+  if (search) filtered = filtered.filter(w =>
+    w.name.toLowerCase().includes(search) || (w.skill||'').toLowerCase().includes(search)
+  );
+
+  const customCount = catalogState.list.length;
+  if (countEl) countEl.textContent = `${customCount} personalizada${customCount !== 1 ? 's' : ''} · ${WEAPON_PRESETS.length} padrão`;
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="9" style="text-align:center;color:var(--text-muted);padding:16px">Nenhuma arma encontrada.</td></tr>';
+    return;
+  }
+
+  const CAT_LABELS = { melee:'C.C.', handgun:'Pistola', rifle:'Rifle', smg:'SMG', heavy:'Pesada', explosive:'Explos.', other:'Outro' };
+  tbody.innerHTML = filtered.map(w => `
+    <tr class="${w._builtin ? 'catalog-builtin-row' : ''}">
+      <td title="${w.notes||''}">${w.name}${w._builtin ? ' <span class="catalog-builtin-badge">padrão</span>' : ''}</td>
+      <td>${CAT_LABELS[w.category]||w.category}</td>
+      <td style="font-size:12px">${w.skill||'—'}</td>
+      <td>${w.damage||'—'}</td>
+      <td>${w.range||'—'}</td>
+      <td>${w.attacks_per_round||'—'}</td>
+      <td>${w.ammo||0}</td>
+      <td>${w.malfunction||100}</td>
+      <td class="catalog-actions">
+        ${w._builtin ? '<span style="font-size:11px;color:var(--text-muted)">somente leitura</span>' : `
+          <button class="btn btn-sm btn-ghost cat-edit-btn" data-wid="${w.id}">✏️</button>
+          <button class="btn btn-sm btn-danger cat-del-btn" data-wid="${w.id}">✕</button>
+        `}
+      </td>
+    </tr>`).join('');
+
+  tbody.querySelectorAll('.cat-edit-btn').forEach(btn =>
+    btn.addEventListener('click', () => {
+      const w = catalogState.list.find(x => x.id === +btn.dataset.wid);
+      if (w) openCatalogForm(w);
+    })
+  );
+  tbody.querySelectorAll('.cat-del-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const wid = +btn.dataset.wid;
+      const w = catalogState.list.find(x => x.id === wid);
+      if (!confirm(`Excluir "${w?.name}"?`)) return;
+      await api.delete(`/api/weapon-catalog/${wid}`);
+      catalogState.list = catalogState.list.filter(x => x.id !== wid);
+      renderCatalogTable();
+      rebuildWeaponDatalist();
+    })
+  );
+}
+
+function rebuildWeaponDatalist() {
+  const dl = $('#weapon-presets');
+  if (!dl) return;
+  dl.innerHTML = '';
+  // Built-in presets first
+  WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
+  // Then catalog weapons
+  catalogState.list.forEach(w => {
+    if (!WEAPON_PRESETS.find(p => p.name === w.name)) {
+      const o = document.createElement('option'); o.value = w.name; dl.appendChild(o);
+    }
+  });
+}
+
+function getCatalogWeaponPreset(name) {
+  // Check catalog first, then built-in
+  const catWeapon = catalogState.list.find(w => w.name === name);
+  if (catWeapon) return {
+    name: catWeapon.name, skill: catWeapon.skill, damage: catWeapon.damage,
+    range: catWeapon.range, attacks_per_round: catWeapon.attacks_per_round,
+    ammo: catWeapon.ammo, malfunction: catWeapon.malfunction,
+  };
+  return WEAPON_PRESETS.find(p => p.name === name) || null;
+}
+
+// ══════════════════════════════════════════════════════════════
+// COMPARTILHAR VIA LINK (base64)
+// ══════════════════════════════════════════════════════════════
+
+function setupShareLink() {
+  $('#btn-share-link')?.addEventListener('click', openShareModal);
+  $('#share-modal-close')?.addEventListener('click', () => $('#share-modal').classList.remove('open'));
+  $('#btn-copy-share-link')?.addEventListener('click', copyShareLink);
+  $$('input[name="share-type"]').forEach(r => r.addEventListener('change', updateShareLink));
+}
+
+function openShareModal() {
+  if (!state.current) return;
+  updateShareLink();
+  $('#share-modal').classList.add('open');
+}
+
+function updateShareLink() {
+  if (!state.current) return;
+  const type = document.querySelector('input[name="share-type"]:checked')?.value || 'full';
+  const c = { ...state.current };
+  if (type === 'friend') {
+    ['appearance_desc','ideology','significant_people','meaningful_locations',
+     'treasured_possessions','traits','injuries_scars','phobias_manias',
+     'arcane_tomes','backstory','notes'].forEach(f => delete c[f]);
+  }
+  const payload = { version: 3, exportedAt: new Date().toISOString(), character: c, isFriendExport: type === 'friend' };
+  try {
+    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
+    const url = `${location.origin}${location.pathname}?share=${encoded}`;
+    const input = $('#share-link-input');
+    if (input) input.value = url;
+    $('#share-copied').style.display = 'none';
+  } catch (e) { console.error('Erro ao gerar link:', e); }
+}
+
+async function copyShareLink() {
+  const input = $('#share-link-input');
+  if (!input) return;
+  try {
+    await navigator.clipboard.writeText(input.value);
+  } catch {
+    input.select(); document.execCommand('copy');
+  }
+  const copied = $('#share-copied');
+  if (copied) { copied.style.display = 'block'; setTimeout(() => copied.style.display = 'none', 3000); }
+}
+
+function checkShareParam() {
+  const params = new URLSearchParams(location.search);
+  const shareData = params.get('share');
+  if (!shareData) return;
+  // Clean URL
+  history.replaceState({}, '', location.pathname);
+  try {
+    const json = decodeURIComponent(escape(atob(shareData)));
+    const parsed = JSON.parse(json);
+    const charData = parsed.character || parsed;
+    if (!charData.name) return;
+    const isFriend = parsed.isFriendExport;
+    const msg = isFriend
+      ? `Deseja importar o personagem amigo "${charData.name}"?`
+      : `Deseja importar o personagem "${charData.name}" via link compartilhado?`;
+    if (!confirm(msg)) return;
+    api.post('/api/import', { character: charData }).then(imported => {
+      state.characters.unshift({ id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age });
+      renderCharacterList();
+      selectCharacter(imported.id);
+    }).catch(e => alert('Erro ao importar: ' + e.message));
+  } catch (e) { console.error('Erro ao processar link compartilhado:', e); }
+}
+
+// ══════════════════════════════════════════════════════════════
+// CREDIT RATING → CÁLCULO DE BENS E RIQUEZA
+// ══════════════════════════════════════════════════════════════
+
+// CoC 7e — Tabela de Credit Rating (valores em dólares de 1920)
+const CR_TABLE = [
+  { min: 0,  max: 0,  status: 'Pauper',       spending: '$0.50/dia', cash: '$0.50',   assets: '$0 – $1' },
+  { min: 1,  max: 9,  status: 'Pobre',         spending: '$1–2/dia',  cash: '$1–9',    assets: '$2–18' },
+  { min: 10, max: 29, status: 'Médio',          spending: '$10/dia',   cash: '$10–99',  assets: '$100–499' },
+  { min: 30, max: 49, status: 'Confortável',    spending: '$20/dia',   cash: '$50–299', assets: '$500–4.999' },
+  { min: 50, max: 69, status: 'Próspero',       spending: '$50/dia',   cash: '$500–1.999', assets: '$5.000–49.999' },
+  { min: 70, max: 89, status: 'Rico',           spending: '$500/dia',  cash: '$2.000–9.999', assets: '$50.000–499.999' },
+  { min: 90, max: 98, status: 'Muito Rico',     spending: '$2.000/dia',cash: '$10.000–99.999', assets: '$500.000–5.000.000' },
+  { min: 99, max: 99, status: 'Super Rico',     spending: 'Sem limite',cash: '$250.000+', assets: '$5.000.000+' },
+];
+
+function setupCreditRating() {
+  $('#btn-calc-cr')?.addEventListener('click', calcCreditRating);
+}
+
+function calcCreditRating() {
+  if (!state.current) { alert('Selecione um personagem primeiro.'); return; }
+  const crSkill = state.current.skills?.find(s => s.name.includes('Credit Rating'));
+  if (!crSkill) { alert('Habilidade "Credit Rating" não encontrada.'); return; }
+  const crVal = crSkill.value || crSkill.base_value || 0;
+  const row = CR_TABLE.find(r => crVal >= r.min && crVal <= r.max) || CR_TABLE[0];
+
+  const resultEl = $('#cr-result');
+  if (resultEl) {
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = `
+      <div class="cr-result-inner">
+        <div class="cr-result-status"><strong>Credit Rating: ${crVal}%</strong> — ${row.status}</div>
+        <div class="cr-result-row">
+          <span class="cr-label">Gasto Diário:</span><span class="cr-val">${row.spending}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="spending_level" data-val="${row.spending}">Aplicar</button>
+        </div>
+        <div class="cr-result-row">
+          <span class="cr-label">Dinheiro em Mãos:</span><span class="cr-val">${row.cash}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="cash" data-val="${row.cash}">Aplicar</button>
+        </div>
+        <div class="cr-result-row">
+          <span class="cr-label">Patrimônio:</span><span class="cr-val">${row.assets}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="assets" data-val="${row.assets}">Aplicar</button>
+        </div>
+      </div>`;
+
+    resultEl.querySelectorAll('.cr-apply-btn').forEach(btn =>
+      btn.addEventListener('click', async () => {
+        const field = btn.dataset.field;
+        const val = btn.dataset.val;
+        const inputMap = { cash: '#field-cash', spending_level: '#field-spending-level', assets: '#field-assets' };
+        const el = $(inputMap[field]);
+        if (el) { el.value = val; state.current[field] = val; }
+        await api.put(`/api/characters/${state.current.id}`, { [field]: val });
+        showSaveIndicator();
+        btn.textContent = '✓';
+        setTimeout(() => btn.textContent = 'Aplicar', 2000);
+      })
+    );
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
+// RETRATO — Change/Remove Photo
+// ══════════════════════════════════════════════════════════════
+
+function setupPortraitActions() {
+  const area = $('#portrait-area');
+  const actions = $('#portrait-actions');
+
+  area?.addEventListener('mouseenter', () => {
+    if (state.current && actions) actions.style.display = 'flex';
+  });
+  area?.addEventListener('mouseleave', () => {
+    if (actions) actions.style.display = 'none';
+  });
+
+  $('#btn-change-portrait')?.addEventListener('click', (e) => {
+    e.stopPropagation();
+    if (state.current) $('#portrait-file').click();
+  });
+
+  $('#btn-remove-portrait')?.addEventListener('click', async (e) => {
+    e.stopPropagation();
+    if (!state.current) return;
+    if (!confirm('Remover a foto do personagem?')) return;
+    state.current.image = '';
+    displayPortrait('');
+    await api.put(`/api/characters/${state.current.id}`, { image: '' });
+    showSaveIndicator();
+    if (actions) actions.style.display = 'none';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// NPC EXPORT / IMPORT
+// ══════════════════════════════════════════════════════════════
+
+function setupNpcExportImport() {
+  $('#btn-npcs-export-all')?.addEventListener('click', async () => {
+    const resp = await fetch('/api/npcs/export');
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a'); a.href = url; a.download = 'npcs_export.json'; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $('#btn-export-npc')?.addEventListener('click', async () => {
+    if (!npcState.current) return;
+    const resp = await fetch(`/api/npcs/export/${npcState.current.id}`);
+    const blob = await resp.blob();
+    const url = URL.createObjectURL(blob);
+    const safeName = (npcState.current.name || 'npc').replace(/[^a-z0-9]/gi, '_');
+    const a = document.createElement('a'); a.href = url; a.download = `${safeName}.json`; a.click();
+    URL.revokeObjectURL(url);
+  });
+
+  $('#npcs-import-file')?.addEventListener('change', async (e) => {
+    const file = e.target.files[0]; if (!file) return;
+    try {
+      const text = await file.text();
+      const data = JSON.parse(text);
+      const npcs = data.npcs || (data.npc ? [data.npc] : null);
+      if (!npcs) throw new Error('Formato inválido');
+      const result = await api.post('/api/npcs/import', { npcs });
+      npcState.list = await api.get('/api/npcs');
+      renderNpcList();
+      alert(`${result.count} NPCs importados com sucesso!`);
+    } catch (err) { alert('Erro ao importar: ' + err.message); }
+    e.target.value = '';
+  });
+}
+
+// ══════════════════════════════════════════════════════════════
+// GM VIEW — Enhancements
+// ══════════════════════════════════════════════════════════════
+
+function setupGmEnhancements() {
+  // Quick access buttons
+  $('#btn-gm-npcs')?.addEventListener('click', () => {
+    loadNpcs(); $('#npcs-modal').classList.add('open');
+  });
+  $('#btn-gm-evidence')?.addEventListener('click', () => {
+    loadEvidence(); $('#evidence-modal').classList.add('open');
+  });
+
+  // Bulk damage
+  $('#btn-gm-bulk-san')?.addEventListener('click', () => {
+    const panel = $('#gm-bulk-panel');
+    if (panel) panel.style.display = panel.style.display === 'none' ? 'block' : 'none';
+  });
+  $('#btn-gm-bulk-close')?.addEventListener('click', () => {
+    const panel = $('#gm-bulk-panel'); if (panel) panel.style.display = 'none';
+  });
+  $('#btn-gm-bulk-apply')?.addEventListener('click', async () => {
+    const vital = $('#gm-bulk-vital').value;
+    const dir = +$('#gm-bulk-dir').value;
+    const amount = +$('#gm-bulk-amount').value || 1;
+    if (!confirm(`Aplicar ${dir > 0 ? '+' : ''}${dir * amount} em ${vital.toUpperCase()} de todos os personagens?`)) return;
+    for (const c of state.gmCharacters) {
+      const max = c[`${vital}_max`] || 1;
+      let cur = Math.max(0, Math.min(max, (c[`${vital}_current`] || 0) + dir * amount));
+      c[`${vital}_current`] = cur;
+      await api.put(`/api/characters/${c.id}`, { [`${vital}_current`]: cur });
+    }
+    renderGmView();
+  });
+
+  // Group rolls
+  $('#btn-gm-roll-perception')?.addEventListener('click', () => gmGroupRoll('Spot Hidden', 'Detectar'));
+  $('#btn-gm-roll-san')?.addEventListener('click', () => gmGroupRoll(null, 'SAN', true));
+  $('#btn-gm-reset-vitals')?.addEventListener('click', async () => {
+    if (!confirm('Restaurar HP e MP ao máximo para todos os personagens?')) return;
+    for (const c of state.gmCharacters) {
+      await api.put(`/api/characters/${c.id}`, { hp_current: c.hp_max, mp_current: c.mp_max });
+      c.hp_current = c.hp_max; c.mp_current = c.mp_max;
+    }
+    renderGmView();
+  });
+
+  // Session notes autosave
+  $('#gm-session-notes')?.addEventListener('input', debounce(async () => {
+    if (!sessionState.active) return;
+    await api.put(`/api/sessions/${sessionState.active.id}`, { notes: $('#gm-session-notes').value });
+  }, 800));
+}
+
+function debounce(fn, delay) {
+  let t; return (...args) => { clearTimeout(t); t = setTimeout(() => fn(...args), delay); };
+}
+
+function gmGroupRoll(skillName, label, isSan = false) {
+  const results = state.gmCharacters.map(c => {
+    let target = 0;
+    if (isSan) {
+      target = c.san_current || 0;
+    } else if (skillName) {
+      const sk = c.skills?.find(s => s.name.includes(skillName));
+      target = sk?.value || 0;
+    }
+    const roll = Math.floor(Math.random() * 100) + 1;
+    const { label: lvl } = cocSuccessLevel(roll, target);
+    return { name: c.name, roll, target, lvl };
+  });
+
+  const resultHtml = results.map(r =>
+    `<div><strong>${r.name}</strong>: ${r.roll} vs ${r.target} → ${r.lvl}</div>`
+  ).join('');
+  const div = Object.assign(document.createElement('div'), {
+    style: 'position:fixed;top:80px;right:20px;background:var(--bg-card);border:1px solid var(--accent);padding:16px;border-radius:8px;z-index:999;max-width:300px',
+    innerHTML: `<strong>🎲 ${label} (grupo)</strong><div style="margin-top:8px;font-size:14px">${resultHtml}</div>
+    <button style="margin-top:8px;background:var(--accent);border:none;color:white;padding:4px 12px;border-radius:4px;cursor:pointer">Fechar</button>`,
+  });
+  div.querySelector('button').addEventListener('click', () => div.remove());
+  document.body.appendChild(div);
+  setTimeout(() => div.remove(), 15000);
+}
+
+// ══════════════════════════════════════════════════════════════
+// FRIENDS VIEW — Enhanced (like GM view)
+// ══════════════════════════════════════════════════════════════
+
 function renderFriendCharacters(chars) {
   const grid = $('#friends-grid');
   if (!grid) return;
   if (!chars.length) {
-    grid.innerHTML = '<div class="friends-empty">Nenhum personagem importado ainda.<br><small>Use "Exportar Amigo" na ficha de um personagem para gerar o arquivo de compartilhamento.</small></div>';
+    grid.innerHTML = '<div class="friends-empty">Nenhum personagem importado ainda.<br><small>Use "Exportar Amigo" ou "Compartilhar" na ficha de um personagem.</small></div>';
     return;
   }
   grid.innerHTML = chars.map(c => {
@@ -2005,28 +2634,166 @@ function renderFriendCharacters(chars) {
     const sanPct = c.san_max ? Math.round((c.san_current / c.san_max) * 100) : 0;
     const mpPct  = c.mp_max  ? Math.round((c.mp_current  / c.mp_max)  * 100) : 0;
     const topSkills = (c.skills || [])
-      .filter(s => (s.occ_points || 0) + (s.int_points || 0) + (s.game_points || 0) > 0 || s.value > s.base_value)
+      .filter(s => s.value > s.base_value)
       .sort((a, b) => b.value - a.value)
-      .slice(0, 5);
-    const hasWeapons = (c.weapons || []).filter(w => w.name).length > 0;
-    return `<div class="friend-card">
-      ${c.image
-        ? `<img class="friend-portrait" src="${c.image}" alt="${c.name}" style="cursor:zoom-in" onclick="showImageFullscreen('${c.image}')" />`
-        : '<div class="friend-portrait-placeholder">👤</div>'}
-      <div class="friend-info">
-        <div class="friend-name">${c.name || '—'}</div>
-        <div class="friend-sub">${[c.occupation, c.age ? c.age + ' anos' : ''].filter(Boolean).join(' · ') || '—'}</div>
-        <div class="friend-vitals">
-          <div class="fv-item"><span>HP</span><div class="fv-bar"><div class="fv-fill fv-hp" style="width:${hpPct}%"></div></div><span>${c.hp_current}/${c.hp_max}</span></div>
-          <div class="fv-item"><span>SAN</span><div class="fv-bar"><div class="fv-fill fv-san" style="width:${sanPct}%"></div></div><span>${c.san_current}/${c.san_max}</span></div>
-          <div class="fv-item"><span>MP</span><div class="fv-bar"><div class="fv-fill fv-mp" style="width:${mpPct}%"></div></div><span>${c.mp_current}/${c.mp_max}</span></div>
+      .slice(0, 6);
+    const weapons = (c.weapons || []).filter(w => w.name);
+    const flags = [
+      c.temporary_insanity  ? `<span class="gm-flag gm-flag-temp-insane">Insanidade Temp.</span>` : '',
+      c.indefinite_insanity ? `<span class="gm-flag gm-flag-indef-insane">Insanidade Indef.</span>` : '',
+      c.major_wound         ? `<span class="gm-flag gm-flag-wound">Ferimento Grave</span>` : '',
+      c.unconscious         ? `<span class="gm-flag gm-flag-unconscious">Inconsciente</span>` : '',
+    ].filter(Boolean).join('');
+    return `
+    <div class="friend-gm-card" data-friend-id="${c.id}">
+      <div class="friend-gm-header">
+        <div class="friend-gm-portrait">
+          ${c.image
+            ? `<img src="${c.image}" alt="${c.name}" class="friend-gm-img" onclick="showImageFullscreen('${c.image}')" />`
+            : '<div class="friend-gm-placeholder">👤</div>'}
         </div>
-        ${topSkills.length ? `<div class="friend-skills">🎯 ${topSkills.map(s => `${s.name.split('(')[0].trim()}: <b>${s.value}%</b>`).join(' · ')}</div>` : ''}
-        ${hasWeapons ? `<div class="friend-weapons">🗡 ${c.weapons.filter(w => w.name).map(w => w.name).join(', ')}</div>` : ''}
+        <div class="friend-gm-info">
+          <div class="friend-gm-name">${c.name || '—'}</div>
+          <div class="friend-gm-sub">${[c.occupation, c.age ? c.age + ' anos' : ''].filter(Boolean).join(' · ') || '—'}</div>
+        </div>
+        <button class="btn btn-sm btn-ghost friend-open-btn" data-fid="${c.id}">Ver Ficha</button>
       </div>
+      <div class="friend-gm-vitals">
+        <div class="friend-vital-row">
+          <span class="friend-vital-label">HP</span>
+          <div class="friend-vital-bar"><div class="friend-vital-fill friend-hp-fill" style="width:${hpPct}%"></div></div>
+          <div class="friend-vital-controls">
+            <button class="fv-ctrl-btn" data-fv-vital="hp" data-fid="${c.id}" data-dir="-1">−</button>
+            <span class="friend-vital-val" id="fv-hp-${c.id}">${c.hp_current}/${c.hp_max}</span>
+            <button class="fv-ctrl-btn" data-fv-vital="hp" data-fid="${c.id}" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="friend-vital-row">
+          <span class="friend-vital-label">SAN</span>
+          <div class="friend-vital-bar"><div class="friend-vital-fill friend-san-fill" style="width:${sanPct}%"></div></div>
+          <div class="friend-vital-controls">
+            <button class="fv-ctrl-btn" data-fv-vital="san" data-fid="${c.id}" data-dir="-1">−</button>
+            <span class="friend-vital-val" id="fv-san-${c.id}">${c.san_current}/${c.san_max}</span>
+            <button class="fv-ctrl-btn" data-fv-vital="san" data-fid="${c.id}" data-dir="1">+</button>
+          </div>
+        </div>
+        <div class="friend-vital-row">
+          <span class="friend-vital-label">MP</span>
+          <div class="friend-vital-bar"><div class="friend-vital-fill friend-mp-fill" style="width:${mpPct}%"></div></div>
+          <div class="friend-vital-controls">
+            <button class="fv-ctrl-btn" data-fv-vital="mp" data-fid="${c.id}" data-dir="-1">−</button>
+            <span class="friend-vital-val" id="fv-mp-${c.id}">${c.mp_current}/${c.mp_max}</span>
+            <button class="fv-ctrl-btn" data-fv-vital="mp" data-fid="${c.id}" data-dir="1">+</button>
+          </div>
+        </div>
+      </div>
+      ${flags ? `<div class="friend-flags">${flags}</div>` : ''}
+      ${topSkills.length ? `<div class="friend-gm-skills">🎯 ${topSkills.map(s => `<span title="${s.name}">${s.name.split('(')[0].trim()}: <b>${s.value}%</b></span>`).join('')}</div>` : ''}
+      ${weapons.length ? `<div class="friend-gm-weapons">🗡️ ${weapons.map(w => w.name).join(' · ')}</div>` : ''}
     </div>`;
   }).join('');
+
+  // Vital controls for friends
+  grid.querySelectorAll('.fv-ctrl-btn').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const fid = +btn.dataset.fid;
+      const vital = btn.dataset.fvVital;
+      const dir = +btn.dataset.dir;
+      const c = chars.find(x => x.id === fid);
+      if (!c) return;
+      const max = c[`${vital}_max`] || 1;
+      let cur = Math.max(0, Math.min(max, (c[`${vital}_current`] || 0) + dir));
+      c[`${vital}_current`] = cur;
+      const span = $(`#fv-${vital}-${fid}`);
+      if (span) span.textContent = `${cur}/${max}`;
+      // Update bar
+      const card = grid.querySelector(`[data-friend-id="${fid}"]`);
+      const barMap = { hp: 'friend-hp-fill', san: 'friend-san-fill', mp: 'friend-mp-fill' };
+      const fill = card?.querySelector(`.${barMap[vital]}`);
+      if (fill) fill.style.width = `${Math.round((cur / max) * 100)}%`;
+      await api.put(`/api/characters/${fid}`, { [`${vital}_current`]: cur });
+      // Sync with state.current if it's this char
+      if (state.current?.id === fid) {
+        state.current[`${vital}_current`] = cur;
+        updateVitalDisplay(vital, cur, max);
+      }
+    });
+  });
+
+  // Open character sheet button
+  grid.querySelectorAll('.friend-open-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      await selectCharacter(+btn.dataset.fid);
+      $('#friends-modal').classList.remove('open');
+    })
+  );
 }
 
-// ─── Bootstrap ────────────────────────────────────────────────
-document.addEventListener('DOMContentLoaded', init);
+
+// ══════════════════════════════════════════════════════════════
+// MAIN init() — full version
+// ══════════════════════════════════════════════════════════════
+
+async function init() {
+  await Promise.all([loadCharacters(), loadConfig()]);
+  setupEventListeners();
+  setupDiceRoller();
+  setupGmView();
+  setupConfigPage();
+  setupPortrait();
+  setupPortraitActions();
+  setupBooks();
+  setupEvidence();
+  setupFriends();
+  setupNpcs();
+  setupSessions();
+  setupWeaponCatalog();
+  setupShareLink();
+  setupCreditRating();
+  setupNpcExportImport();
+  setupGmEnhancements();
+  // Load catalog for weapon autocomplete
+  try {
+    catalogState.list = await api.get('/api/weapon-catalog');
+    rebuildWeaponDatalist();
+  } catch (e) {}
+  // Restore active session
+  try {
+    const active = await api.get('/api/sessions/active');
+    if (active) { sessionState.active = active; updateSidebarSessionBadge(active); }
+  } catch (e) {}
+  // Populate weapon presets datalist (built-in)
+  const dl = $('#weapon-presets');
+  if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
+}
+
+// Patch the friends reload button
+document.addEventListener('DOMContentLoaded', () => {
+  $('#btn-friends-reload')?.addEventListener('click', loadFriendCharacters);
+  $('#btn-friend-share-import')?.addEventListener('click', () => {
+    const url = prompt('Cole o link de compartilhamento:');
+    if (!url) return;
+    try {
+      const params = new URLSearchParams(new URL(url).search);
+      const shareData = params.get('share');
+      if (!shareData) throw new Error('Link inválido');
+      const json = decodeURIComponent(escape(atob(shareData)));
+      const parsed = JSON.parse(json);
+      const charData = parsed.character || parsed;
+      if (!charData.name) throw new Error('Personagem inválido');
+      api.post('/api/import', { character: charData }).then(imported => {
+        state.characters = [...state.characters.filter(c => c.id !== imported.id), { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age }];
+        renderCharacterList();
+        loadFriendCharacters();
+        alert(`"${imported.name}" importado com sucesso!`);
+      });
+    } catch (e) { alert('Erro: ' + e.message); }
+  });
+
+  // Update GM session notes when active session changes
+  $('#gm-session-notes')?.addEventListener('focus', () => {
+    if (sessionState.active?.notes) {
+      $('#gm-session-notes').value = sessionState.active.notes || '';
+    }
+  });
+});

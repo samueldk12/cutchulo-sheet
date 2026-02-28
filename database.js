@@ -62,6 +62,31 @@ const DEFAULT_CONFIG = {
 
 function initSchema() {
   db.exec(`
+    CREATE TABLE IF NOT EXISTS weapon_catalog (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT '',
+      skill TEXT DEFAULT '',
+      damage TEXT DEFAULT '',
+      range TEXT DEFAULT '',
+      attacks_per_round TEXT DEFAULT '1',
+      ammo INTEGER DEFAULT 0,
+      malfunction INTEGER DEFAULT 100,
+      category TEXT DEFAULT 'other',
+      notes TEXT DEFAULT '',
+      created_at TEXT DEFAULT (datetime('now'))
+    );
+
+    CREATE TABLE IF NOT EXISTS sessions (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT NOT NULL DEFAULT 'Nova Sessão',
+      role TEXT DEFAULT 'player',
+      character_id INTEGER,
+      notes TEXT DEFAULT '',
+      is_active INTEGER DEFAULT 0,
+      created_at TEXT DEFAULT (datetime('now')),
+      updated_at TEXT DEFAULT (datetime('now'))
+    );
+
     CREATE TABLE IF NOT EXISTS characters (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       uuid TEXT DEFAULT '',
@@ -646,6 +671,89 @@ const evidenceQueries = {
   },
 };
 
+// ─── Weapon Catalog Queries ──────────────────────────────────
+const weaponCatalogQueries = {
+  listAll() {
+    return query('SELECT * FROM weapon_catalog ORDER BY category, name');
+  },
+  getById(id) {
+    return queryOne('SELECT * FROM weapon_catalog WHERE id = ?', [id]);
+  },
+  create(data) {
+    db.run(
+      'INSERT INTO weapon_catalog (name, skill, damage, range, attacks_per_round, ammo, malfunction, category, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+      [data.name||'', data.skill||'', data.damage||'', data.range||'', data.attacks_per_round||'1', data.ammo||0, data.malfunction||100, data.category||'other', data.notes||'']
+    );
+    const id = lastInsertId(); saveDb(); return id;
+  },
+  update(id, data) {
+    const allowed = ['name','skill','damage','range','attacks_per_round','ammo','malfunction','category','notes'];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+    if (!fields.length) return;
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    db.run(`UPDATE weapon_catalog SET ${setClause} WHERE id = ?`, [...fields.map(f => data[f]), id]);
+    saveDb();
+  },
+  delete(id) { db.run('DELETE FROM weapon_catalog WHERE id = ?', [id]); saveDb(); },
+  importBulk(items) {
+    for (const w of items) {
+      const existing = queryOne('SELECT id FROM weapon_catalog WHERE name = ?', [w.name]);
+      if (existing) {
+        const allowed = ['skill','damage','range','attacks_per_round','ammo','malfunction','category','notes'];
+        const fields = allowed.filter(k => w[k] !== undefined);
+        if (fields.length) {
+          const setClause = fields.map(f => `${f} = ?`).join(', ');
+          db.run(`UPDATE weapon_catalog SET ${setClause} WHERE id = ?`, [...fields.map(f => w[f]), existing.id]);
+        }
+      } else {
+        db.run(
+          'INSERT INTO weapon_catalog (name, skill, damage, range, attacks_per_round, ammo, malfunction, category, notes) VALUES (?,?,?,?,?,?,?,?,?)',
+          [w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100, w.category||'other', w.notes||'']
+        );
+      }
+    }
+    saveDb();
+  },
+};
+
+// ─── Session Queries ─────────────────────────────────────────
+const sessionQueries = {
+  listAll() {
+    return query('SELECT * FROM sessions ORDER BY updated_at DESC');
+  },
+  getById(id) {
+    return queryOne('SELECT * FROM sessions WHERE id = ?', [id]);
+  },
+  getActive() {
+    return queryOne('SELECT * FROM sessions WHERE is_active = 1 ORDER BY updated_at DESC');
+  },
+  create(data) {
+    db.run('UPDATE sessions SET is_active = 0');
+    db.run(
+      'INSERT INTO sessions (name, role, character_id, notes, is_active) VALUES (?,?,?,?,1)',
+      [data.name||'Nova Sessão', data.role||'player', data.character_id||null, data.notes||'']
+    );
+    const id = lastInsertId(); saveDb(); return id;
+  },
+  update(id, data) {
+    const allowed = ['name','role','character_id','notes','is_active'];
+    const fields = Object.keys(data).filter(k => allowed.includes(k));
+    if (!fields.length) return;
+    const setClause = fields.map(f => `${f} = ?`).join(', ');
+    db.run(`UPDATE sessions SET ${setClause}, updated_at = datetime('now') WHERE id = ?`, [...fields.map(f => data[f]), id]);
+    saveDb();
+  },
+  activate(id) {
+    db.run('UPDATE sessions SET is_active = 0');
+    db.run("UPDATE sessions SET is_active = 1, updated_at = datetime('now') WHERE id = ?", [id]);
+    saveDb();
+  },
+  delete(id) {
+    db.run('DELETE FROM sessions WHERE id = ?', [id]);
+    saveDb();
+  },
+};
+
 // ─── NPC / Inimigo Queries ───────────────────────────────────
 const npcQueries = {
   listAll() {
@@ -714,6 +822,6 @@ module.exports = {
   initDb, getDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
-  npcQueries,
+  npcQueries, weaponCatalogQueries, sessionQueries,
   DEFAULT_CONFIG,
 };

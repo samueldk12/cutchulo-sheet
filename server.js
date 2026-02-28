@@ -6,7 +6,7 @@ const {
   initDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
-  npcQueries,
+  npcQueries, weaponCatalogQueries, sessionQueries,
   DEFAULT_CONFIG,
 } = require('./database');
 
@@ -124,9 +124,11 @@ app.post('/api/import', (req, res) => {
     delete character.updated_at;
     if (uuid) character.uuid = uuid;
 
+    // Check BEFORE import so wasUpdated is correct
+    const existingByUuid = uuid ? characterQueries.getByUuid(uuid) : null;
     const id = characterQueries.import(character);
     const result = characterQueries.getById(id);
-    res.status(201).json({ ...result, wasUpdated: !!uuid && !!characterQueries.getByUuid(uuid) });
+    res.status(201).json({ ...result, wasUpdated: !!existingByUuid });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -309,6 +311,43 @@ app.get('/api/npcs', (req, res) => {
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Export / Import NPCs ─────────────────────────────────────
+// MUST come before /api/npcs/:id to avoid "export" being treated as an id
+
+app.get('/api/npcs/export', (req, res) => {
+  try {
+    const npcs = npcQueries.listAll().map(n => npcQueries.getById(n.id));
+    res.setHeader('Content-Disposition', 'attachment; filename="npcs_export.json"');
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ version: 1, exportedAt: new Date().toISOString(), npcs });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/npcs/export/:id', (req, res) => {
+  try {
+    const n = npcQueries.getById(+req.params.id);
+    if (!n) return res.status(404).json({ error: 'NPC não encontrado' });
+    const safeName = (n.name || 'npc').replace(/[^a-z0-9_\-\s]/gi, '_');
+    res.setHeader('Content-Disposition', `attachment; filename="${safeName}.json"`);
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ version: 1, exportedAt: new Date().toISOString(), npc: n });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/npcs/import', (req, res) => {
+  try {
+    const list = req.body.npcs || (req.body.npc ? [req.body.npc] : null);
+    if (!Array.isArray(list)) return res.status(400).json({ error: 'Formato inválido: esperado { npcs: [...] }' });
+    const ids = [];
+    for (const n of list) {
+      delete n.id; delete n.created_at; delete n.updated_at;
+      const id = npcQueries.create(n);
+      ids.push(id);
+    }
+    res.status(201).json({ success: true, count: ids.length, ids });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/npcs/:id', (req, res) => {
   try {
     const n = npcQueries.getById(+req.params.id);
@@ -333,6 +372,89 @@ app.put('/api/npcs/:id', (req, res) => {
 
 app.delete('/api/npcs/:id', (req, res) => {
   try { npcQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Catálogo de Armas ────────────────────────────────────────
+
+app.get('/api/weapon-catalog', (req, res) => {
+  try { res.json(weaponCatalogQueries.listAll()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/weapon-catalog', (req, res) => {
+  try {
+    if (!req.body.name) return res.status(400).json({ error: 'name é obrigatório' });
+    const id = weaponCatalogQueries.create(req.body);
+    res.status(201).json(weaponCatalogQueries.getById(id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/weapon-catalog/:id', (req, res) => {
+  try { weaponCatalogQueries.update(+req.params.id, req.body); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/weapon-catalog/:id', (req, res) => {
+  try { weaponCatalogQueries.delete(+req.params.id); res.json({ success: true }); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Export weapon catalog as JSON file
+app.get('/api/weapon-catalog/export', (req, res) => {
+  try {
+    const items = weaponCatalogQueries.listAll();
+    res.setHeader('Content-Disposition', 'attachment; filename="weapon_catalog.json"');
+    res.setHeader('Content-Type', 'application/json');
+    res.json({ version: 1, exportedAt: new Date().toISOString(), weapons: items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Import weapon catalog from JSON body
+app.post('/api/weapon-catalog/import', (req, res) => {
+  try {
+    const weapons = req.body.weapons || req.body;
+    if (!Array.isArray(weapons)) return res.status(400).json({ error: 'weapons deve ser um array' });
+    weaponCatalogQueries.importBulk(weapons);
+    res.json({ success: true, count: weapons.length });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Sessões ──────────────────────────────────────────────────
+
+app.get('/api/sessions', (req, res) => {
+  try { res.json(sessionQueries.listAll()); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.get('/api/sessions/active', (req, res) => {
+  try { res.json(sessionQueries.getActive() || null); }
+  catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/sessions', (req, res) => {
+  try {
+    const id = sessionQueries.create(req.body);
+    res.status(201).json(sessionQueries.getById(id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/sessions/:id', (req, res) => {
+  try {
+    sessionQueries.update(+req.params.id, req.body);
+    res.json(sessionQueries.getById(+req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.put('/api/sessions/:id/activate', (req, res) => {
+  try {
+    sessionQueries.activate(+req.params.id);
+    res.json(sessionQueries.getById(+req.params.id));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.delete('/api/sessions/:id', (req, res) => {
+  try { sessionQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 

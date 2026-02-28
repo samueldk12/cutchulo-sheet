@@ -33,11 +33,13 @@
   </div>
 
   <div class="sidebar-bottom">
+    <button class="sidebar-action-btn sidebar-sessions-btn" id="btn-sessions">🎮 Sessões</button>
     <button class="sidebar-action-btn" id="btn-gm-view">🎭 Vista do Mestre</button>
     <button class="sidebar-action-btn" id="btn-npcs">👹 NPCs / Inimigos</button>
     <button class="sidebar-action-btn" id="btn-books">📚 Livros / PDFs</button>
     <button class="sidebar-action-btn" id="btn-evidence">🔍 Evidências</button>
     <button class="sidebar-action-btn" id="btn-friends">👥 Amigos</button>
+    <button class="sidebar-action-btn" id="btn-weapon-catalog">⚔️ Catálogo de Armas</button>
     <label class="sidebar-action-btn" for="import-file">📥 Importar Personagem</label>
     <input type="file" id="import-file" accept=".json" style="display:none" />
     <button class="sidebar-action-btn" id="btn-config">⚙️ Configurações</button>
@@ -60,10 +62,14 @@
 
     <!-- Header -->
     <div class="sheet-header">
-      <div class="portrait-area" id="portrait-area" title="Clique para adicionar foto do personagem">
+      <div class="portrait-area" id="portrait-area" title="Clique para alterar foto do personagem">
         <img id="portrait-img" src="" alt="Retrato" style="display:none" />
         <div class="portrait-placeholder" id="portrait-placeholder">👤</div>
         <input type="file" id="portrait-file" accept="image/*" style="display:none" />
+        <div class="portrait-actions" id="portrait-actions" style="display:none">
+          <button class="portrait-action-btn" id="btn-change-portrait" title="Alterar foto">📷</button>
+          <button class="portrait-action-btn portrait-remove-btn" id="btn-remove-portrait" title="Remover foto">✕</button>
+        </div>
         <div class="portrait-fullscreen-hint" id="portrait-fullscreen-hint">🔍</div>
       </div>
       <div class="sheet-title-area">
@@ -77,6 +83,7 @@
       <div class="sheet-actions">
         <button class="btn btn-secondary btn-sm" id="btn-export-char" title="Exportar personagem completo como JSON">📤 Exportar</button>
         <button class="btn btn-secondary btn-sm" id="btn-export-friend" title="Exportar versão amigo (sem lore)">👥 Exportar Amigo</button>
+        <button class="btn btn-secondary btn-sm" id="btn-share-link" title="Compartilhar via link">🔗 Compartilhar</button>
         <button class="btn btn-danger btn-sm" id="btn-delete-char">Excluir</button>
         <div class="save-indicator" id="save-indicator">Salvo ✓</div>
       </div>
@@ -310,6 +317,10 @@
             <input type="text" class="field-input" id="field-assets" placeholder="Ex: $500 em poupança, casa, automóvel..." />
           </div>
         </div>
+        <div class="wealth-cr-calc" id="wealth-cr-calc">
+          <button class="btn btn-sm btn-secondary" id="btn-calc-cr">💰 Calcular pelo Credit Rating</button>
+          <div class="cr-result" id="cr-result" style="display:none"></div>
+        </div>
         <div class="wealth-hint">
           <small>💡 Classificação de Crédito (Credit Rating) na aba Habilidades determina riqueza base. Use estes campos para rastrear recursos durante a campanha.</small>
         </div>
@@ -454,11 +465,50 @@
       <div class="gm-title">
         <span class="gm-icon">🎭</span>
         <h2>Vista do Mestre</h2>
+        <span class="gm-session-name" id="gm-session-name"></span>
       </div>
       <div class="gm-tools">
         <button class="btn btn-sm btn-secondary" id="btn-gm-dice">🎲 Dados</button>
+        <button class="btn btn-sm btn-secondary" id="btn-gm-npcs">👹 NPCs</button>
+        <button class="btn btn-sm btn-secondary" id="btn-gm-evidence">🔍 Evidências</button>
+        <button class="btn btn-sm btn-ghost" id="btn-gm-bulk-san">⚡ Dano em Grupo</button>
         <button class="btn btn-sm btn-ghost" id="btn-gm-reload">↻ Atualizar</button>
         <button class="btn btn-sm btn-ghost" id="btn-gm-close">← Fichas</button>
+      </div>
+    </div>
+    <!-- GM Quick Panel -->
+    <div class="gm-quick-panel" id="gm-quick-panel">
+      <div class="gm-quick-section">
+        <div class="gm-quick-title">⚡ Ação Rápida</div>
+        <div class="gm-quick-actions">
+          <button class="btn btn-sm btn-ghost" id="btn-gm-roll-perception">Teste de Percepção (grupo)</button>
+          <button class="btn btn-sm btn-ghost" id="btn-gm-roll-san">Teste de SAN (grupo)</button>
+          <button class="btn btn-sm btn-ghost" id="btn-gm-reset-vitals">Restaurar HP/MP (todos)</button>
+        </div>
+      </div>
+      <div class="gm-session-notes-section">
+        <div class="gm-quick-title">📝 Notas da Sessão</div>
+        <textarea class="gm-session-notes-input" id="gm-session-notes" placeholder="Anotações do mestre para esta sessão..."></textarea>
+      </div>
+    </div>
+    <!-- Bulk damage modal -->
+    <div class="gm-bulk-panel" id="gm-bulk-panel" style="display:none">
+      <div class="gm-bulk-header">
+        <span>⚡ Dano / Cura em Grupo</span>
+        <button class="btn btn-sm btn-ghost" id="btn-gm-bulk-close">✕</button>
+      </div>
+      <div class="gm-bulk-form">
+        <select id="gm-bulk-vital">
+          <option value="hp">HP</option>
+          <option value="san">SAN</option>
+          <option value="mp">MP</option>
+        </select>
+        <select id="gm-bulk-dir">
+          <option value="-1">Dano (−)</option>
+          <option value="1">Cura (+)</option>
+        </select>
+        <input type="number" id="gm-bulk-amount" min="1" max="99" value="1" style="width:60px" />
+        <button class="btn btn-sm btn-danger" id="btn-gm-bulk-apply">Aplicar a Todos</button>
       </div>
     </div>
     <div class="gm-grid" id="gm-grid">
@@ -702,6 +752,9 @@
       <button class="btn btn-sm btn-primary" id="btn-add-npc" data-type="npc">+ NPC</button>
       <button class="btn btn-sm btn-danger-outline" id="btn-add-enemy" data-type="enemy">+ Inimigo</button>
       <button class="btn btn-sm btn-monster" id="btn-add-monster" data-type="monster">+ Monstro</button>
+      <button class="btn btn-sm btn-secondary" id="btn-npcs-export-all">📤 Exportar Todos</button>
+      <label class="btn btn-sm btn-ghost" for="npcs-import-file">📥 Importar</label>
+      <input type="file" id="npcs-import-file" accept=".json" style="display:none" />
       <div class="npcs-filter">
         <button class="npc-filter-btn active" data-filter="all">Todos</button>
         <button class="npc-filter-btn" data-filter="npc">NPCs</button>
@@ -719,7 +772,10 @@
     <div class="npc-editor" id="npc-editor" style="display:none">
       <div class="npc-editor-header">
         <h3 id="npc-editor-title">Editar NPC</h3>
-        <button class="btn btn-sm btn-danger" id="btn-delete-npc">Excluir</button>
+        <div class="npc-editor-actions">
+          <button class="btn btn-sm btn-secondary" id="btn-export-npc">📤 Exportar</button>
+          <button class="btn btn-sm btn-danger" id="btn-delete-npc">Excluir</button>
+        </div>
       </div>
 
       <!-- Foto e identificação -->
@@ -827,10 +883,196 @@
     <div class="friends-toolbar">
       <label class="btn btn-primary btn-sm" for="friend-import-file">📥 Importar Amigo</label>
       <input type="file" id="friend-import-file" accept=".json" style="display:none" />
-      <span class="friends-hint-text">Versão resumida sem histórico/lore do personagem</span>
+      <button class="btn btn-secondary btn-sm" id="btn-friend-share-import">🔗 Importar via Link</button>
+      <button class="btn btn-ghost btn-sm" id="btn-friends-reload">↻ Atualizar</button>
+      <span class="friends-hint-text">Acompanhe os aliados da party em tempo real</span>
     </div>
     <div class="friends-grid" id="friends-grid">
-      <div class="friends-empty">Nenhum personagem amigo importado ainda.<br><small>Use "Exportar Amigo" na ficha de um personagem para gerar o arquivo de compartilhamento.</small></div>
+      <div class="friends-empty">Nenhum personagem importado ainda.<br><small>Use "Exportar Amigo" ou "Compartilhar" na ficha de um personagem.</small></div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Sessões ═══ -->
+<div class="modal-overlay" id="sessions-modal">
+  <div class="modal sessions-modal">
+    <div class="modal-header">
+      <h2>🎮 Sessões de Jogo</h2>
+      <button class="modal-close" id="sessions-modal-close">✕</button>
+    </div>
+    <div class="sessions-toolbar">
+      <button class="btn btn-primary btn-sm" id="btn-create-session">+ Nova Sessão</button>
+      <span class="sessions-hint">Gerencie suas sessões e seu papel no jogo</span>
+    </div>
+    <!-- Form nova sessão -->
+    <div class="session-create-form" id="session-create-form" style="display:none">
+      <div class="session-form-inner">
+        <div class="field-group">
+          <label>Nome da Sessão</label>
+          <input type="text" id="sess-name" class="field-input" placeholder="Ex: A Máscara de Nyarlathotep - Sessão 3" />
+        </div>
+        <div class="field-group">
+          <label>Seu Papel</label>
+          <div class="sess-role-picker">
+            <label class="sess-role-opt">
+              <input type="radio" name="sess-role" value="master" id="sess-role-master" />
+              <span class="sess-role-card">
+                <span class="sess-role-icon">🎭</span>
+                <span class="sess-role-label">Mestre</span>
+                <span class="sess-role-desc">Vista completa com controle de todos os personagens</span>
+              </span>
+            </label>
+            <label class="sess-role-opt">
+              <input type="radio" name="sess-role" value="player" id="sess-role-player" checked />
+              <span class="sess-role-card">
+                <span class="sess-role-icon">🕵️</span>
+                <span class="sess-role-label">Jogador</span>
+                <span class="sess-role-desc">Vista da ficha do seu personagem</span>
+              </span>
+            </label>
+          </div>
+        </div>
+        <div class="field-group" id="sess-char-group">
+          <label>Selecionar Personagem</label>
+          <select id="sess-character" class="field-input">
+            <option value="">— Escolher depois —</option>
+          </select>
+        </div>
+        <div class="session-form-actions">
+          <button class="btn btn-ghost" id="btn-cancel-session">Cancelar</button>
+          <button class="btn btn-primary" id="btn-confirm-session">Entrar na Sessão</button>
+        </div>
+      </div>
+    </div>
+    <!-- Lista de sessões existentes -->
+    <div class="sessions-list" id="sessions-list">
+      <div class="sessions-empty">Nenhuma sessão criada. Crie uma sessão para organizar seu jogo.</div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Catálogo de Armas ═══ -->
+<div class="modal-overlay" id="weapon-catalog-modal">
+  <div class="modal weapon-catalog-modal">
+    <div class="modal-header">
+      <h2>⚔️ Catálogo de Armas</h2>
+      <button class="modal-close" id="weapon-catalog-modal-close">✕</button>
+    </div>
+    <div class="weapon-catalog-toolbar">
+      <button class="btn btn-primary btn-sm" id="btn-catalog-add">+ Nova Arma</button>
+      <button class="btn btn-secondary btn-sm" id="btn-catalog-export">📤 Exportar JSON</button>
+      <label class="btn btn-ghost btn-sm" for="catalog-import-file">📥 Importar JSON</label>
+      <input type="file" id="catalog-import-file" accept=".json" style="display:none" />
+      <span class="catalog-count" id="catalog-count"></span>
+    </div>
+    <!-- Form de nova/edição de arma -->
+    <div class="catalog-form" id="catalog-form" style="display:none">
+      <div class="catalog-form-grid">
+        <div class="field-group">
+          <label>Nome</label>
+          <input type="text" id="cat-name" class="field-input" placeholder="Ex: Colt .45 Auto" />
+        </div>
+        <div class="field-group">
+          <label>Categoria</label>
+          <select id="cat-category" class="field-input">
+            <option value="melee">Corpo a Corpo</option>
+            <option value="handgun">Pistola</option>
+            <option value="rifle">Rifle / Escopeta</option>
+            <option value="smg">Submetralhadora</option>
+            <option value="heavy">Arma Pesada</option>
+            <option value="explosive">Explosivo</option>
+            <option value="other">Outro</option>
+          </select>
+        </div>
+        <div class="field-group">
+          <label>Habilidade</label>
+          <input type="text" id="cat-skill" class="field-input" placeholder="Ex: Firearms (Handgun) (Pistola)" />
+        </div>
+        <div class="field-group">
+          <label>Dano</label>
+          <input type="text" id="cat-damage" class="field-input" placeholder="Ex: 1d10+2" />
+        </div>
+        <div class="field-group">
+          <label>Alcance</label>
+          <input type="text" id="cat-range" class="field-input" placeholder="Ex: 15m" />
+        </div>
+        <div class="field-group">
+          <label>Ataques/Rodada</label>
+          <input type="text" id="cat-apr" class="field-input" placeholder="Ex: 1/3" />
+        </div>
+        <div class="field-group">
+          <label>Munição</label>
+          <input type="number" id="cat-ammo" class="field-input" min="0" value="0" />
+        </div>
+        <div class="field-group">
+          <label>Malf.</label>
+          <input type="number" id="cat-malfunction" class="field-input" min="1" max="100" value="100" />
+        </div>
+        <div class="field-group field-group-wide">
+          <label>Notas</label>
+          <input type="text" id="cat-notes" class="field-input" placeholder="Regras especiais, munição especial..." />
+        </div>
+      </div>
+      <div class="catalog-form-actions">
+        <button class="btn btn-ghost btn-sm" id="btn-catalog-cancel">Cancelar</button>
+        <button class="btn btn-primary btn-sm" id="btn-catalog-save">Salvar Arma</button>
+      </div>
+    </div>
+    <!-- Tabela de armas do catálogo -->
+    <div class="catalog-filter-row">
+      <select id="catalog-filter-cat" class="field-input" style="width:auto;font-size:13px">
+        <option value="all">Todas as categorias</option>
+        <option value="melee">Corpo a Corpo</option>
+        <option value="handgun">Pistola</option>
+        <option value="rifle">Rifle / Escopeta</option>
+        <option value="smg">Submetralhadora</option>
+        <option value="heavy">Arma Pesada</option>
+        <option value="explosive">Explosivo</option>
+        <option value="other">Outro</option>
+      </select>
+      <input type="text" id="catalog-search" class="field-input" style="flex:1;font-size:13px" placeholder="🔍 Buscar arma..." />
+    </div>
+    <div class="catalog-table-wrapper">
+      <table class="catalog-table">
+        <thead><tr>
+          <th>Nome</th><th>Cat.</th><th>Habilidade</th><th>Dano</th><th>Alcance</th>
+          <th>Ataques</th><th>Mun.</th><th>Malf.</th><th></th>
+        </tr></thead>
+        <tbody id="catalog-tbody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Compartilhar via Link ═══ -->
+<div class="modal-overlay" id="share-modal">
+  <div class="modal share-modal">
+    <div class="modal-header">
+      <h2>🔗 Compartilhar Personagem</h2>
+      <button class="modal-close" id="share-modal-close">✕</button>
+    </div>
+    <div class="share-content">
+      <p class="share-desc">Copie o link abaixo para compartilhar este personagem. Quem receber pode importar diretamente colando o link na barra de endereço.</p>
+      <div class="share-link-row">
+        <input type="text" id="share-link-input" class="share-link-input" readonly />
+        <button class="btn btn-primary btn-sm" id="btn-copy-share-link">📋 Copiar</button>
+      </div>
+      <div class="share-copied" id="share-copied" style="display:none">✓ Link copiado!</div>
+      <div class="share-or">— ou —</div>
+      <div class="share-qr-section">
+        <p class="share-qr-label">QR Code para o link:</p>
+        <div id="share-qr-placeholder" class="share-qr-placeholder">QR Code disponível ao abrir este modal com um personagem carregado</div>
+      </div>
+      <div class="share-type-row">
+        <label class="share-type-opt">
+          <input type="radio" name="share-type" value="full" checked />
+          <span>📋 Completo (com histórico/lore)</span>
+        </label>
+        <label class="share-type-opt">
+          <input type="radio" name="share-type" value="friend" />
+          <span>👥 Amigo (sem lore/background)</span>
+        </label>
+      </div>
     </div>
   </div>
 </div>
