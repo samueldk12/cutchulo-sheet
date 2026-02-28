@@ -77,26 +77,62 @@ function getSkillDescription(skillName) {
 
 // ─── Preset de Armas CoC 7e ────────────────────────────────
 const WEAPON_PRESETS = [
-  { name: 'Soco (Fist/Punch)', skill: 'Fighting (Brawl) (Luta)', damage: '1d3+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  // ── Combate Corpo a Corpo ──
+  { name: 'Soco (Fist/Punch)', skill: 'Fighting (Brawl) (Luta)', damage: '1d3+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100, notes: 'Ataque desarmado básico' },
   { name: 'Pontapé (Kick)', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Cabeçada (Headbutt)', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Estrangulamento/Garrote', skill: 'Fighting (Brawl) (Luta)', damage: '1d6', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100, notes: 'Mantém presa; vítima sufoca' },
   { name: 'Faca (Knife)', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
   { name: 'Faca Bowie', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Baioneta', skill: 'Fighting (Brawl) (Luta)', damage: '1d4+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Porrete/Cassetete', skill: 'Fighting (Brawl) (Luta)', damage: '1d6+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Taco de Beisebol', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Haste de Ferro/Pé-de-Cabra', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Marreta (Sledgehammer)', skill: 'Fighting (Brawl) (Luta)', damage: '1d10+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100, notes: 'Pesada; –10% para acertar' },
   { name: 'Machado (Axe)', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+2+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
   { name: 'Machete', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
-  { name: 'Taco de Beisebol', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
-  { name: 'Espada (Sword)', skill: 'Fighting (Brawl) (Luta)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Espada (Sword)', skill: 'Fighting (Sword) (Espada)', damage: '1d8+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Sabre/Florete', skill: 'Fighting (Sword) (Espada)', damage: '1d6+db', range: 'Toque', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Lança (Spear)', skill: 'Fighting (Spear) (Lança)', damage: '1d8+1+db', range: 'Toque/3m', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Chicote (Whip)', skill: 'Fighting (Whip) (Chicote)', damage: '1d3+db', range: '3m', attacks_per_round: '1', ammo: 0, malfunction: 100, notes: 'Pode enredar; alcance 3m' },
+  { name: 'Arco e Flecha', skill: 'Throw (Arremesso)', damage: '1d6+db', range: '50m', attacks_per_round: '1', ammo: 0, malfunction: 100 },
+  { name: 'Besta (Crossbow)', skill: 'Throw (Arremesso)', damage: '1d8+2', range: '40m', attacks_per_round: '½', ammo: 1, malfunction: 100 },
+  // ── Pistolas / Revólveres ──
+  { name: 'Derringer .41', skill: 'Firearms (Handgun) (Pistola)', damage: '1d8', range: '5m', attacks_per_round: '1/2', ammo: 2, malfunction: 100, notes: 'Pequena; fácil de esconder' },
+  { name: 'Revólver .32', skill: 'Firearms (Handgun) (Pistola)', damage: '1d8', range: '15m', attacks_per_round: '1/2', ammo: 5, malfunction: 100 },
   { name: 'Pistola .22', skill: 'Firearms (Handgun) (Pistola)', damage: '1d6', range: '15m', attacks_per_round: '1/3', ammo: 9, malfunction: 99 },
   { name: 'Revólver .38', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100 },
-  { name: 'Colt .45 Auto', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/3', ammo: 7, malfunction: 100 },
+  { name: 'Colt .45 Auto (M1911)', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/3', ammo: 7, malfunction: 100 },
   { name: 'Revólver .45', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100 },
   { name: 'Luger P08', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '20m', attacks_per_round: '1/3', ammo: 8, malfunction: 100 },
-  { name: 'Escopeta 12 Gauge', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '4d6/2d6/1d6', range: '10m/20m/50m', attacks_per_round: '1/2', ammo: 2, malfunction: 100 },
+  { name: 'Walther PPK .32', skill: 'Firearms (Handgun) (Pistola)', damage: '1d8', range: '15m', attacks_per_round: '1/3', ammo: 7, malfunction: 100, notes: 'Compacta; popular em detetives' },
+  { name: 'Mauser C96', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '20m', attacks_per_round: '1/3', ammo: 10, malfunction: 100 },
+  { name: 'Webley Mk VI .455', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10+2', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100, notes: 'Revólver britânico da WWI' },
+  { name: 'Smith & Wesson .44', skill: 'Firearms (Handgun) (Pistola)', damage: '2d6+1', range: '15m', attacks_per_round: '1/2', ammo: 6, malfunction: 100 },
+  { name: 'Browning Hi-Power 9mm', skill: 'Firearms (Handgun) (Pistola)', damage: '1d10', range: '20m', attacks_per_round: '1/3', ammo: 13, malfunction: 100 },
+  // ── Rifles e Espingardas ──
+  { name: 'Escopeta 12 Gauge (2 canos)', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '4d6/2d6/1d6', range: '10m/20m/50m', attacks_per_round: '1/2', ammo: 2, malfunction: 100 },
+  { name: 'Winchester 1897 (pump)', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '4d6/2d6/1d6', range: '10m/20m/50m', attacks_per_round: '1', ammo: 5, malfunction: 100 },
+  { name: 'Escopeta Cano Curto (sawed-off)', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '4d6/2d6', range: '5m/10m', attacks_per_round: '1/2', ammo: 2, malfunction: 100, notes: 'Ilegal; fácil de esconder' },
   { name: 'Winchester .30-06', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 5, malfunction: 100 },
   { name: 'Springfield M1903', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 5, malfunction: 100 },
+  { name: 'Lee-Enfield .303', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 10, malfunction: 100, notes: 'Rifle britânico padrão; ação de ferrolho rápida' },
+  { name: 'Mauser Gewehr 98', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1', ammo: 5, malfunction: 100, notes: 'Rifle alemão da WWI' },
+  { name: 'Carabina .30 M1', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+1', range: '50m', attacks_per_round: '1', ammo: 15, malfunction: 100 },
+  { name: 'Browning BAR', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1/completo', ammo: 20, malfunction: 100, notes: 'Rifle automático; disparo em rajada possível' },
+  // ── Submetralhadoras ──
   { name: 'Thompson M1928 (SMG)', skill: 'Firearms (Submachine Gun) (Submetralhadora)', damage: '1d10+2', range: '20m', attacks_per_round: '½/2/completo', ammo: 30, malfunction: 96 },
-  { name: 'Browning BAR', skill: 'Firearms (Rifle/Shotgun) (Rifle)', damage: '2d6+4', range: '110m', attacks_per_round: '1/full', ammo: 20, malfunction: 100 },
-  { name: 'Dinamite (1 bastão)', skill: 'Demolitions (Demolições)', damage: '4d10', range: 'Arremesso', attacks_per_round: '1', ammo: 1, malfunction: 100 },
-  { name: 'Granada de mão', skill: 'Throw (Arremesso)', damage: '4d6+2', range: '10m', attacks_per_round: '1', ammo: 1, malfunction: 100 },
+  { name: 'MP18', skill: 'Firearms (Submachine Gun) (Submetralhadora)', damage: '1d10', range: '15m', attacks_per_round: '½/2/completo', ammo: 32, malfunction: 96, notes: 'Primeira SMG de guerra; alemã' },
+  { name: 'Sten Mk II', skill: 'Firearms (Submachine Gun) (Submetralhadora)', damage: '1d10', range: '30m', attacks_per_round: '½/2/completo', ammo: 32, malfunction: 95, notes: 'Britânica; barata e produzida em massa' },
+  { name: 'MP40', skill: 'Firearms (Submachine Gun) (Submetralhadora)', damage: '1d10', range: '30m', attacks_per_round: '½/2/completo', ammo: 32, malfunction: 96, notes: 'SMG alemã da WWII' },
+  // ── Metralhadoras / Pesadas ──
+  { name: 'Lewis Gun (metralhadora)', skill: 'Firearms (Heavy) (Pesada)', damage: '2d6+4', range: '100m', attacks_per_round: '½/2/completo', ammo: 47, malfunction: 96, notes: 'Metralhadora leve; bipé' },
+  { name: 'Browning M1917 (metralhadora)', skill: 'Firearms (Heavy) (Pesada)', damage: '2d8+4', range: '200m', attacks_per_round: 'completo', ammo: 250, malfunction: 97, notes: 'Metralhadora pesada; tripé; refrigerada a água' },
+  // ── Explosivos e Especiais ──
+  { name: 'Dinamite (1 bastão)', skill: 'Demolitions (Demolições)', damage: '4d10', range: 'Arremesso', attacks_per_round: '1', ammo: 1, malfunction: 100, notes: 'Raio de explosão 3m' },
+  { name: 'Granada de mão (Mk II)', skill: 'Throw (Arremesso)', damage: '4d6+2', range: '10m', attacks_per_round: '1', ammo: 1, malfunction: 100, notes: 'Timer ~5s; raio 10m' },
+  { name: 'Coquetel Molotov', skill: 'Throw (Arremesso)', damage: '2d6 fogo', range: '10m', attacks_per_round: '1', ammo: 1, malfunction: 100, notes: 'Incendeia área; +1d3/rodada enquanto arder' },
+  { name: 'Lança-chamas', skill: 'Firearms (Heavy) (Pesada)', damage: '2d6 fogo', range: '10m', attacks_per_round: '1', ammo: 10, malfunction: 97, notes: 'Ignora armadura; incendeia área; requer testes de SAN' },
 ];
 
 // ─── Estado Global ────────────────────────────────────────────
@@ -1406,6 +1442,34 @@ function setupEvidence() {
     evidenceState.items.unshift(item);
     renderEvidence();
   });
+
+  // Export evidence as JSON
+  $('#btn-evidence-export')?.addEventListener('click', () => {
+    const data = { version: 1, exportedAt: new Date().toISOString(), evidence: evidenceState.items };
+    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const a = Object.assign(document.createElement('a'), {
+      href: URL.createObjectURL(blob),
+      download: `evidencias-${new Date().toISOString().slice(0,10)}.json`
+    });
+    a.click(); URL.revokeObjectURL(a.href);
+  });
+
+  // Import evidence from JSON file
+  $('#evidence-import-file')?.addEventListener('change', async (e) => {
+    try {
+      const file = e.target.files[0];
+      if (!file) return;
+      const text = await file.text();
+      const parsed = JSON.parse(text);
+      const items = parsed.evidence || (Array.isArray(parsed) ? parsed : []);
+      if (!items.length) { alert('Nenhuma evidência encontrada no arquivo.'); return; }
+      const result = await api.post('/api/evidence/import', { evidence: items });
+      evidenceState.items = await api.get('/api/evidence');
+      renderEvidence();
+      alert(`${result.count} evidência(s) importada(s)!`);
+    } catch (err) { alert('Erro ao importar evidências: ' + err.message); }
+    e.target.value = '';
+  });
 }
 
 async function loadEvidence() {
@@ -2353,13 +2417,22 @@ function updateShareLink() {
      'treasured_possessions','traits','injuries_scars','phobias_manias',
      'arcane_tomes','backstory','notes'].forEach(f => delete c[f]);
   }
-  const payload = { version: 3, exportedAt: new Date().toISOString(), character: c, isFriendExport: type === 'friend' };
+  const payload = { version: 4, exportedAt: new Date().toISOString(), character: c, isFriendExport: type === 'friend' };
+  // Include evidence in full export
+  if (type === 'full' && evidenceState.items.length > 0) {
+    payload.evidence = evidenceState.items.map(({ id, ...ev }) => ev);
+  }
   try {
     const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
     const url = `${location.origin}${location.pathname}?share=${encoded}`;
     const input = $('#share-link-input');
     if (input) input.value = url;
     $('#share-copied').style.display = 'none';
+    // Update share desc with evidence count
+    const descEl = $('.share-desc');
+    if (descEl && type === 'full' && evidenceState.items.length > 0) {
+      descEl.innerHTML = `Copie o link abaixo para compartilhar. Quem receber pode clicar em <strong>🔗 Importar via Link</strong> na barra lateral para importar de forma rápida. <em>(inclui ${evidenceState.items.length} evidência(s))</em>`;
+    }
   } catch (e) { console.error('Erro ao gerar link:', e); }
 }
 
@@ -2375,28 +2448,93 @@ async function copyShareLink() {
   if (copied) { copied.style.display = 'block'; setTimeout(() => copied.style.display = 'none', 3000); }
 }
 
-function checkShareParam() {
+async function checkShareParam() {
   const params = new URLSearchParams(location.search);
   const shareData = params.get('share');
   if (!shareData) return;
-  // Clean URL
   history.replaceState({}, '', location.pathname);
   try {
-    const json = decodeURIComponent(escape(atob(shareData)));
-    const parsed = JSON.parse(json);
+    const parsed = _decodeShareData(shareData);
+    if (!parsed) return;
     const charData = parsed.character || parsed;
     if (!charData.name) return;
+    const evidenceItems = parsed.evidence || [];
     const isFriend = parsed.isFriendExport;
-    const msg = isFriend
+    let msg = isFriend
       ? `Deseja importar o personagem amigo "${charData.name}"?`
       : `Deseja importar o personagem "${charData.name}" via link compartilhado?`;
+    if (evidenceItems.length > 0) msg += `\n(inclui ${evidenceItems.length} evidência(s))`;
     if (!confirm(msg)) return;
-    api.post('/api/import', { character: charData }).then(imported => {
-      state.characters.unshift({ id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age });
-      renderCharacterList();
-      selectCharacter(imported.id);
-    }).catch(e => alert('Erro ao importar: ' + e.message));
+    const imported = await api.post('/api/import', { character: charData });
+    const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+    const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+    if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
+    renderCharacterList();
+    selectCharacter(imported.id);
+    if (evidenceItems.length > 0) {
+      await api.post('/api/evidence/import', { evidence: evidenceItems });
+      evidenceState.items = await api.get('/api/evidence');
+    }
   } catch (e) { console.error('Erro ao processar link compartilhado:', e); }
+}
+
+// Helper: decode base64 share data from URL or raw string
+function _decodeShareData(raw) {
+  try {
+    // Try extracting from URL if looks like a URL
+    if (raw.startsWith('http') || raw.includes('?share=')) {
+      try {
+        const url = new URL(raw.startsWith('http') ? raw : 'https://x?' + raw.split('?')[1]);
+        raw = url.searchParams.get('share') || raw;
+      } catch { /* use as-is */ }
+    }
+    return JSON.parse(decodeURIComponent(escape(atob(raw))));
+  } catch { return null; }
+}
+
+function setupImportLinkModal() {
+  const modal = $('#import-link-modal');
+  if (!modal) return;
+  const closeModal = () => {
+    modal.classList.remove('open');
+    $('#import-link-input').value = '';
+    $('#import-link-result').style.display = 'none';
+  };
+  $('#btn-import-link')?.addEventListener('click', () => modal.classList.add('open'));
+  $('#import-link-modal-close')?.addEventListener('click', closeModal);
+  $('#btn-import-link-cancel')?.addEventListener('click', closeModal);
+  modal.addEventListener('click', e => { if (e.target === modal) closeModal(); });
+
+  $('#btn-import-link-confirm')?.addEventListener('click', async () => {
+    const raw = $('#import-link-input').value.trim();
+    if (!raw) return;
+    const resultEl = $('#import-link-result');
+    resultEl.style.display = 'block';
+    resultEl.innerHTML = '<span style="color:var(--text-muted)">Importando...</span>';
+    try {
+      const parsed = _decodeShareData(raw);
+      if (!parsed) throw new Error('Link ou código inválido');
+      const charData = parsed.character || parsed;
+      if (!charData.name) throw new Error('Personagem sem nome no link');
+      const imported = await api.post('/api/import', { character: charData });
+      const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+      const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+      if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
+      renderCharacterList();
+      await selectCharacter(imported.id);
+      let lines = [`✓ Personagem <strong>"${imported.name}"</strong> ${imported.wasUpdated ? 'atualizado' : 'importado'}!`];
+      const evidenceItems = parsed.evidence || [];
+      if (evidenceItems.length > 0) {
+        await api.post('/api/evidence/import', { evidence: evidenceItems });
+        evidenceState.items = await api.get('/api/evidence');
+        lines.push(`✓ ${evidenceItems.length} evidência(s) importada(s)!`);
+      }
+      resultEl.innerHTML = `<span style="color:#4caf50">${lines.join('<br>')}</span>`;
+      setTimeout(closeModal, 2500);
+    } catch (e) {
+      resultEl.innerHTML = `<span style="color:var(--danger)">Erro: ${e.message}</span>`;
+    }
+  });
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -2752,6 +2890,7 @@ async function init() {
   setupCreditRating();
   setupNpcExportImport();
   setupGmEnhancements();
+  setupImportLinkModal();
   // Load catalog for weapon autocomplete
   try {
     catalogState.list = await api.get('/api/weapon-catalog');

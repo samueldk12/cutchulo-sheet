@@ -42,6 +42,7 @@
     <button class="sidebar-action-btn" id="btn-weapon-catalog">⚔️ Catálogo de Armas</button>
     <label class="sidebar-action-btn" for="import-file">📥 Importar Personagem</label>
     <input type="file" id="import-file" accept=".json" style="display:none" />
+    <button class="sidebar-action-btn" id="btn-import-link">🔗 Importar via Link</button>
     <button class="sidebar-action-btn" id="btn-config">⚙️ Configurações</button>
   </div>
 </aside>
@@ -701,6 +702,9 @@
     </div>
     <div class="evidence-toolbar">
       <button class="btn btn-primary btn-sm" id="btn-add-evidence">+ Nova Evidência</button>
+      <button class="btn btn-ghost btn-sm" id="btn-evidence-export">📤 Exportar</button>
+      <label class="btn btn-ghost btn-sm" for="evidence-import-file">📥 Importar</label>
+      <input type="file" id="evidence-import-file" accept=".json" style="display:none" />
       <span class="evidence-count" id="evidence-count"></span>
     </div>
     <div class="evidence-grid" id="evidence-grid">
@@ -1052,7 +1056,7 @@
       <button class="modal-close" id="share-modal-close">✕</button>
     </div>
     <div class="share-content">
-      <p class="share-desc">Copie o link abaixo para compartilhar este personagem. Quem receber pode importar diretamente colando o link na barra de endereço.</p>
+      <p class="share-desc">Copie o link abaixo para compartilhar. Quem receber pode clicar em <strong>🔗 Importar via Link</strong> na barra lateral para importar de forma rápida.</p>
       <div class="share-link-row">
         <input type="text" id="share-link-input" class="share-link-input" readonly />
         <button class="btn btn-primary btn-sm" id="btn-copy-share-link">📋 Copiar</button>
@@ -1073,6 +1077,25 @@
           <span>👥 Amigo (sem lore/background)</span>
         </label>
       </div>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ MODAL: Importar via Link ═══ -->
+<div class="modal-overlay" id="import-link-modal">
+  <div class="modal import-link-modal">
+    <div class="modal-header">
+      <h2>🔗 Importar via Link</h2>
+      <button class="modal-close" id="import-link-modal-close">✕</button>
+    </div>
+    <div class="import-link-content">
+      <p class="share-desc">Cole o link de compartilhamento ou o código base64 abaixo e clique em Importar.</p>
+      <textarea id="import-link-input" class="import-link-textarea" placeholder="Cole aqui o link (ex: http://...?share=...) ou o código base64 diretamente..."></textarea>
+      <div class="import-link-actions">
+        <button class="btn btn-primary" id="btn-import-link-confirm">📥 Importar</button>
+        <button class="btn btn-ghost" id="btn-import-link-cancel">Cancelar</button>
+      </div>
+      <div id="import-link-result" class="import-link-result" style="display:none"></div>
     </div>
   </div>
 </div>

@@ -157,4 +157,9 @@ sketch
 books/
 .claude/
 
+# SQLite database (dados locais, não versionar)
+*.db
+*.db-shm
+*.db-wal
+
 # End of https://www.toptal.com/developers/gitignore/api/react,nod

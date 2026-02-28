@@ -282,6 +282,27 @@ app.delete('/api/books/:filename', (req, res) => {
 
 // ─── Evidências ──────────────────────────────────────────────
 
+app.get('/api/evidence/export', (req, res) => {
+  try {
+    const items = evidenceQueries.listAll();
+    res.json({ version: 1, exportedAt: new Date().toISOString(), evidence: items });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+app.post('/api/evidence/import', (req, res) => {
+  try {
+    const { evidence } = req.body;
+    if (!Array.isArray(evidence)) return res.status(400).json({ error: 'Campo "evidence" deve ser array' });
+    let count = 0;
+    for (const item of evidence) {
+      const { title, description, session_tag, image } = item;
+      evidenceQueries.create({ title: title || 'Evidência', description: description || '', session_tag: session_tag || '', image: image || null });
+      count++;
+    }
+    res.json({ success: true, count });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get('/api/evidence', (req, res) => {
   try { res.json(evidenceQueries.listAll()); }
   catch (e) { res.status(500).json({ error: e.message }); }

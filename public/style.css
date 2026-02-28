@@ -2719,6 +2719,14 @@ body {
 .share-type-opt { display: flex; align-items: center; gap: 8px; cursor: pointer; font-size: 14px; }
 .share-type-opt input { accent-color: var(--accent); }
 
+/* ─── Import via Link Modal ─── */
+.import-link-modal { width: 560px; max-width: 95vw; }
+.import-link-content { padding: 20px; }
+.import-link-textarea { width: 100%; min-height: 100px; background: var(--bg-input); border: 1px solid var(--border); border-radius: 6px; color: var(--text-primary); font-family: monospace; font-size: 12px; padding: 10px 12px; resize: vertical; box-sizing: border-box; margin-bottom: 14px; }
+.import-link-textarea:focus { border-color: var(--accent); outline: none; }
+.import-link-actions { display: flex; gap: 10px; }
+.import-link-result { margin-top: 14px; padding: 10px 14px; border-radius: 6px; background: var(--bg-panel); border: 1px solid var(--border); font-size: 14px; line-height: 1.6; }
+
 /* ─── Portrait Actions ─── */
 .portrait-actions { position: absolute; bottom: 0; left: 0; right: 0; display: flex; gap: 4px; padding: 4px; background: rgba(0,0,0,0.7); z-index: 3; justify-content: center; }
 .portrait-action-btn { background: rgba(255,255,255,0.15); border: none; border-radius: 4px; color: white; font-size: 14px; padding: 4px 8px; cursor: pointer; transition: background 0.2s; }
