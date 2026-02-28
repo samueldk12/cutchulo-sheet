@@ -2821,6 +2821,18 @@ body {
   border-radius: 4px; padding: 1px 6px;
   vertical-align: middle; opacity: 0.85;
 }
+.pdf-regex-btn {
+  font-family: monospace; font-size: 13px; font-weight: 700;
+  background: transparent; color: var(--text-muted);
+  border: 1px solid var(--border); border-radius: 5px;
+  padding: 2px 8px; cursor: pointer; transition: all 0.15s;
+  line-height: 1.4;
+}
+.pdf-regex-btn:hover { border-color: var(--accent); color: var(--accent); }
+.pdf-regex-btn.active {
+  background: var(--accent); color: #fff;
+  border-color: var(--accent);
+}
 
 /* ─── Friends View Enhanced ─── */
 .friends-modal { width: 1100px; max-width: 97vw; max-height: 90vh; display: flex; flex-direction: column; }

@@ -1423,12 +1423,13 @@ async function loadBooks() {
 
 function openBookViewer(filename, page, searchTerm) {
   $('#book-viewer-title').textContent = `📖 ${filename}${page ? ` — p. ${page}` : ''}`;
-  // PDF.js viewer: ?file=URL#page=N&search=term  — opens find bar automatically
+  // PDF.js viewer: file param must NOT be double-encoded — pass the already-encoded URL directly
   const fileUrl = `/books/${encodeURIComponent(filename)}`;
   let hash = '';
   if (page)       hash += `page=${page}`;
   if (searchTerm) hash += `${hash ? '&' : ''}search=${encodeURIComponent(searchTerm)}`;
-  const src = `/pdfjs/viewer.html?file=${encodeURIComponent(fileUrl)}${hash ? '#' + hash : ''}`;
+  // Use fileUrl directly (single-encoded) — do NOT wrap in encodeURIComponent again
+  const src = `/pdfjs/viewer.html?file=${fileUrl}${hash ? '#' + hash : ''}`;
   $('#book-viewer-iframe').src = src;
   $('#books-modal').classList.remove('open');
   $('#book-viewer-modal').classList.add('open');
@@ -2948,21 +2949,37 @@ async function init() {
 // BUSCA EM PDFs — Ctrl+K
 // ══════════════════════════════════════════════════════════════
 
-function _highlightMatch(text, q) {
-  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-  return text.replace(new RegExp(esc, 'gi'), m => `<mark>${m}</mark>`);
+function _highlightMatch(text, pattern) {
+  // pattern can be a string (literal) or RegExp
+  if (typeof pattern === 'string') {
+    const esc = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    pattern = new RegExp(esc, 'gi');
+  } else {
+    pattern = new RegExp(pattern.source, 'gi'); // reset lastIndex
+  }
+  return text.replace(pattern, m => `<mark>${m}</mark>`);
 }
 
 function setupPdfSearch() {
-  const overlay = $('#pdf-search-overlay');
-  const input   = $('#pdf-search-input');
-  const results = $('#pdf-search-results');
+  const overlay   = $('#pdf-search-overlay');
+  const input     = $('#pdf-search-input');
+  const results   = $('#pdf-search-results');
+  const regexBtn  = $('#pdf-search-regex-btn');
   if (!overlay) return;
+
+  let regexMode = false;
 
   const open  = () => { overlay.classList.add('open'); setTimeout(() => input?.focus(), 50); };
   const close = () => { overlay.classList.remove('open'); };
 
-  // Ctrl+K global shortcut (also triggered from sidebar btn-books if we add one)
+  regexBtn?.addEventListener('click', () => {
+    regexMode = !regexMode;
+    regexBtn.classList.toggle('active', regexMode);
+    regexBtn.title = regexMode ? 'Modo regex ativo — clique para desativar' : 'Ativar busca por regex';
+    // re-trigger search
+    input.dispatchEvent(new Event('input'));
+  });
+
   document.addEventListener('keydown', e => {
     if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
       e.preventDefault();
@@ -2973,35 +2990,54 @@ function setupPdfSearch() {
   overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
 
   let debounce;
-  input?.addEventListener('input', () => {
+  const doSearch = () => {
     clearTimeout(debounce);
     const q = input.value.trim();
     if (q.length < 2) {
       results.innerHTML = '<div class="pdf-search-hint">Digite pelo menos 2 caracteres para buscar...</div>';
       return;
     }
+
+    // Validate regex before sending
+    if (regexMode) {
+      try { new RegExp(q); }
+      catch (e) {
+        results.innerHTML = `<div class="pdf-no-results">⚠️ Regex inválido: ${e.message}</div>`;
+        return;
+      }
+    }
+
     results.innerHTML = '<div class="pdf-searching">🔄 Buscando...</div>';
     debounce = setTimeout(async () => {
       try {
-        const data = await api.get(`/api/books/search?q=${encodeURIComponent(q)}`);
-        if (!data.length) {
-          results.innerHTML = '<div class="pdf-no-results">Nenhum resultado encontrado.</div>';
-          return;
-        }
+        const url = `/api/books/search?q=${encodeURIComponent(q)}${regexMode ? '&regex=true' : ''}`;
+        const data = await api.get(url);
+        if (data.error) { results.innerHTML = `<div class="pdf-no-results">⚠️ ${data.error}</div>`; return; }
+        if (!data.length) { results.innerHTML = '<div class="pdf-no-results">Nenhum resultado encontrado.</div>'; return; }
+
+        // Build highlight pattern
+        let hlPattern;
+        if (regexMode) {
+          try { hlPattern = new RegExp(q, 'gi'); } catch { hlPattern = q; }
+        } else { hlPattern = q; }
+
         results.innerHTML = data.map(r => `
           <div class="pdf-result-book">
             <div class="pdf-result-book-name">📄 ${r.book} <span style="font-size:11px;color:var(--text-muted)">(${r.matches.length} trecho${r.matches.length > 1 ? 's' : ''})</span></div>
             ${r.matches.map(m => `
-              <div class="pdf-result-match" data-book="${encodeURIComponent(r.book)}" data-page="${m.page || ''}">
+              <div class="pdf-result-match" data-book="${encodeURIComponent(r.book)}" data-page="${m.page || ''}" data-match="${encodeURIComponent(m.matchText || q)}">
                 <span class="pdf-result-page">p. ${m.page || '?'}</span>
-                ...${_highlightMatch(m.context, q)}...
+                ...${_highlightMatch(m.context, hlPattern)}...
               </div>
             `).join('')}
           </div>`).join('');
+
         results.querySelectorAll('.pdf-result-match').forEach(el =>
           el.addEventListener('click', () => {
-            const page = el.dataset.page ? parseInt(el.dataset.page) : undefined;
-            openBookViewer(decodeURIComponent(el.dataset.book), page, q);
+            const page      = el.dataset.page ? parseInt(el.dataset.page) : undefined;
+            // For PDF.js #search= use the actual matched text (not the regex pattern)
+            const searchFor = decodeURIComponent(el.dataset.match || q);
+            openBookViewer(decodeURIComponent(el.dataset.book), page, searchFor);
             close();
           })
         );
@@ -3009,7 +3045,9 @@ function setupPdfSearch() {
         results.innerHTML = `<div class="pdf-no-results">Erro: ${err.message}</div>`;
       }
     }, 400);
-  });
+  };
+
+  input?.addEventListener('input', doSearch);
 }
 
 // Patch the friends reload button

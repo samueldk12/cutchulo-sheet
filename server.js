@@ -36,8 +36,11 @@ app.use(express.json({ limit: '10mb' }));
 app.use(express.static(path.join(__dirname, 'public')));
 // Serve uploaded books
 app.use('/books', express.static(BOOKS_DIR, { dotfiles: 'deny' }));
-// Serve PDF.js viewer
+// Serve PDF.js viewer (viewer.html is at /pdfjs/viewer.html)
 app.use('/pdfjs', express.static(path.join(__dirname, 'public', 'pdfjs')));
+// viewer.js has workerSrc: "../build/pdf.worker.js" which resolves to /build/pdf.worker.js
+// Mirror the build folder there so the worker loads correctly
+app.use('/build', express.static(path.join(__dirname, 'public', 'pdfjs', 'build')));
 
 // ─── Personagens ─────────────────────────────────────────────
 
@@ -305,23 +308,38 @@ function getPage(pos, pageStarts) {
 
 app.get('/api/books/search', async (req, res) => {
   try {
-    const q = (req.query.q || '').trim();
+    const q       = (req.query.q || '').trim();
+    const useRegex = req.query.regex === 'true';
     if (!q || q.length < 2) return res.json([]);
-    const qLow = q.toLowerCase();
+
+    let pattern;
+    if (useRegex) {
+      try { pattern = new RegExp(q, 'gi'); }
+      catch (e) { return res.status(400).json({ error: `Regex inválido: ${e.message}` }); }
+    } else {
+      const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+      pattern = new RegExp(escaped, 'gi');
+    }
+
     const files = fs.readdirSync(BOOKS_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
     const results = [];
     for (const file of files) {
       try {
         const { text, pageStarts } = await extractPdfText(file);
-        const lower = text.toLowerCase();
         const matches = [];
-        let idx = 0;
-        while ((idx = lower.indexOf(qLow, idx)) !== -1 && matches.length < 5) {
+        let m;
+        pattern.lastIndex = 0;
+        while ((m = pattern.exec(text)) !== null && matches.length < 5) {
+          const idx   = m.index;
           const start = Math.max(0, idx - 120);
-          const end   = Math.min(text.length, idx + q.length + 120);
+          const end   = Math.min(text.length, idx + m[0].length + 120);
           const page  = getPage(idx, pageStarts);
-          matches.push({ context: text.slice(start, end).replace(/\s+/g, ' ').trim(), pos: idx, page });
-          idx += q.length;
+          matches.push({
+            context: text.slice(start, end).replace(/\s+/g, ' ').trim(),
+            pos: idx,
+            page,
+            matchText: m[0],   // actual matched string (useful for regex)
+          });
         }
         if (matches.length) results.push({ book: file, matches });
       } catch { /* skip unreadable PDF */ }
