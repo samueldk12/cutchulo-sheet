@@ -2788,6 +2788,7 @@ function setupImportLinkModal() {
   if (!modal) return;
   const closeModal = () => {
     modal.classList.remove('open');
+    delete modal.dataset.forceAsFriend;
     $('#import-link-input').value = '';
     $('#import-link-result').style.display = 'none';
   };
@@ -2807,7 +2808,7 @@ function setupImportLinkModal() {
       if (!parsed) throw new Error('Link ou código inválido');
       const charData = parsed.character || parsed;
       if (!charData.name) throw new Error('Personagem sem nome no link');
-      const isFriend = !!parsed.isFriendExport;
+      const isFriend = !!parsed.isFriendExport || modal.dataset.forceAsFriend === 'true';
       const imported = await api.post('/api/import', { character: charData, isFriendExport: isFriend });
       let lines = [];
       if (isFriend) {
@@ -3344,21 +3345,15 @@ function setupPdfSearch() {
 document.addEventListener('DOMContentLoaded', () => {
   $('#btn-friends-reload')?.addEventListener('click', loadFriendCharacters);
   $('#btn-friend-share-import')?.addEventListener('click', () => {
-    const url = prompt('Cole o link de compartilhamento:');
-    if (!url) return;
-    try {
-      const params = new URLSearchParams(new URL(url).search);
-      const shareData = params.get('share');
-      if (!shareData) throw new Error('Link inválido');
-      const json = decodeURIComponent(escape(atob(shareData)));
-      const parsed = JSON.parse(json);
-      const charData = parsed.character || parsed;
-      if (!charData.name) throw new Error('Personagem inválido');
-      api.post('/api/import', { character: charData, isFriendExport: true }).then(imported => {
-        loadFriendCharacters();
-        alert(`"${imported.name}" adicionado como amigo!`);
-      });
-    } catch (e) { alert('Erro: ' + e.message); }
+    // Open the import link modal and force isFriendExport on confirm
+    const modal = $('#import-link-modal');
+    if (!modal) return;
+    // Flag: when this modal is opened from Friends panel, always import as friend
+    modal.dataset.forceAsFriend = 'true';
+    $('#import-link-input').value = '';
+    $('#import-link-result').style.display = 'none';
+    modal.classList.add('open');
+    $('#friends-modal').classList.remove('open');
   });
 
   // Update GM session notes when active session changes
