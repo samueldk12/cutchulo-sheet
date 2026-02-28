@@ -259,7 +259,7 @@ function rollDice(expression, bonus = 0, penalty = 0) {
 
 // ─── Livros (PDFs) ───────────────────────────────────────────
 
-// Text cache: Map<filename:mtime, { text, pages }>
+// Text cache: Map<filename:mtime, { text, pages, pageStarts }>
 const pdfTextCache = new Map();
 
 async function extractPdfText(filename) {
@@ -267,11 +267,38 @@ async function extractPdfText(filename) {
   const stat = fs.statSync(fp);
   const key = `${filename}:${stat.mtime.getTime()}`;
   if (pdfTextCache.has(key)) return pdfTextCache.get(key);
+
+  // pageStarts[i] = char offset where page (i+1) begins
+  const pageStarts = [];
+  let accumulated = '';
+
+  const options = {
+    pagerender: async (pageData) => {
+      pageStarts.push(accumulated.length);
+      const tc = await pageData.getTextContent();
+      const str = tc.items.map(i => i.str).join('') + '\n';
+      accumulated += str;
+      return str;
+    }
+  };
+
   const buf = fs.readFileSync(fp);
-  const data = await pdfParse(buf);
-  const result = { text: data.text, pages: data.numpages };
+  await pdfParse(buf, options);
+
+  const result = { text: accumulated, pages: pageStarts.length, pageStarts };
   pdfTextCache.set(key, result);
   return result;
+}
+
+// Returns 1-based page number for a char offset
+function getPage(pos, pageStarts) {
+  let lo = 0, hi = pageStarts.length - 1;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (pageStarts[mid] <= pos) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo + 1;
 }
 
 app.get('/api/books/search', async (req, res) => {
@@ -283,14 +310,15 @@ app.get('/api/books/search', async (req, res) => {
     const results = [];
     for (const file of files) {
       try {
-        const { text } = await extractPdfText(file);
+        const { text, pageStarts } = await extractPdfText(file);
         const lower = text.toLowerCase();
         const matches = [];
         let idx = 0;
         while ((idx = lower.indexOf(qLow, idx)) !== -1 && matches.length < 5) {
           const start = Math.max(0, idx - 120);
           const end   = Math.min(text.length, idx + q.length + 120);
-          matches.push({ context: text.slice(start, end).replace(/\s+/g, ' ').trim(), pos: idx });
+          const page  = getPage(idx, pageStarts);
+          matches.push({ context: text.slice(start, end).replace(/\s+/g, ' ').trim(), pos: idx, page });
           idx += q.length;
         }
         if (matches.length) results.push({ book: file, matches });

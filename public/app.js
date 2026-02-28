@@ -1421,9 +1421,10 @@ async function loadBooks() {
   } catch (e) { list.innerHTML = `<div class="books-empty">Erro: ${e.message}</div>`; }
 }
 
-function openBookViewer(filename) {
-  $('#book-viewer-title').textContent = `📖 ${filename}`;
-  $('#book-viewer-iframe').src = `/books/${encodeURIComponent(filename)}`;
+function openBookViewer(filename, page) {
+  $('#book-viewer-title').textContent = `📖 ${filename}${page ? ` — p. ${page}` : ''}`;
+  const src = `/books/${encodeURIComponent(filename)}${page ? '#page=' + page : ''}`;
+  $('#book-viewer-iframe').src = src;
   $('#books-modal').classList.remove('open');
   $('#book-viewer-modal').classList.add('open');
 }
@@ -2986,12 +2987,16 @@ function setupPdfSearch() {
           <div class="pdf-result-book">
             <div class="pdf-result-book-name">📄 ${r.book} <span style="font-size:11px;color:var(--text-muted)">(${r.matches.length} trecho${r.matches.length > 1 ? 's' : ''})</span></div>
             ${r.matches.map(m => `
-              <div class="pdf-result-match" data-book="${encodeURIComponent(r.book)}">...${_highlightMatch(m.context, q)}...</div>
+              <div class="pdf-result-match" data-book="${encodeURIComponent(r.book)}" data-page="${m.page || ''}">
+                <span class="pdf-result-page">p. ${m.page || '?'}</span>
+                ...${_highlightMatch(m.context, q)}...
+              </div>
             `).join('')}
           </div>`).join('');
         results.querySelectorAll('.pdf-result-match').forEach(el =>
           el.addEventListener('click', () => {
-            openBookViewer(decodeURIComponent(el.dataset.book));
+            const page = el.dataset.page ? parseInt(el.dataset.page) : undefined;
+            openBookViewer(decodeURIComponent(el.dataset.book), page);
             close();
           })
         );
