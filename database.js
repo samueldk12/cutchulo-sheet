@@ -3,12 +3,17 @@ const path = require('path');
 const fs = require('fs');
 const { randomUUID } = require('crypto');
 
-const DB_PATH = path.join(__dirname, 'cthulhu.db');
+const DB_DIR  = path.join(__dirname, 'data');
+const DB_PATH = path.join(DB_DIR, 'cthulhu.db');
 let db = null;
 
 async function initDb() {
+  // Ensure data directory exists
+  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+
   const SQL = await initSqlJs();
-  db = fs.existsSync(DB_PATH)
+  const isValidFile = fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).isFile();
+  db = isValidFile
     ? new SQL.Database(fs.readFileSync(DB_PATH))
     : new SQL.Database();
   db.run('PRAGMA foreign_keys = ON');
