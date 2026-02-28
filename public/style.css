@@ -2762,6 +2762,59 @@ body {
 .gm-bulk-form { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
 .gm-bulk-form select, .gm-bulk-form input[type="number"] { background: var(--bg-input); border: 1px solid var(--border); border-radius: 4px; color: var(--text-primary); padding: 5px 8px; font-family: var(--font-body); }
 
+/* ─── PDF Search Overlay (Ctrl+K) ─── */
+.pdf-search-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,0.65); backdrop-filter: blur(4px);
+  display: none; align-items: flex-start; justify-content: center;
+  padding-top: 80px;
+}
+.pdf-search-overlay.open { display: flex; }
+.pdf-search-box {
+  width: 680px; max-width: 96vw;
+  background: var(--bg-card); border: 1px solid var(--accent);
+  border-radius: 12px; overflow: hidden;
+  box-shadow: 0 20px 60px rgba(0,0,0,0.6);
+}
+.pdf-search-header {
+  display: flex; justify-content: space-between; align-items: center;
+  padding: 10px 16px; border-bottom: 1px solid var(--border);
+  font-size: 13px; color: var(--text-secondary); font-family: var(--font-display);
+}
+.pdf-search-kbd {
+  background: var(--bg-panel); border: 1px solid var(--border);
+  border-radius: 4px; padding: 2px 6px; font-size: 11px; color: var(--text-muted);
+  font-family: monospace;
+}
+.pdf-search-input {
+  width: 100%; padding: 14px 16px; font-size: 15px;
+  background: transparent; border: none; border-bottom: 1px solid var(--border);
+  color: var(--text-primary); font-family: var(--font-body); outline: none;
+  box-sizing: border-box;
+}
+.pdf-search-input::placeholder { color: var(--text-muted); }
+.pdf-search-results {
+  max-height: 420px; overflow-y: auto; padding: 8px 0;
+}
+.pdf-search-hint, .pdf-no-results, .pdf-searching {
+  padding: 16px; color: var(--text-muted); font-size: 14px; text-align: center;
+}
+.pdf-result-book { padding: 6px 0; border-bottom: 1px solid var(--border); }
+.pdf-result-book:last-child { border-bottom: none; }
+.pdf-result-book-name {
+  padding: 6px 16px; font-size: 12px; font-family: var(--font-display);
+  color: var(--gold); letter-spacing: 0.03em;
+}
+.pdf-result-match {
+  padding: 8px 16px; cursor: pointer; transition: background 0.15s;
+  font-size: 13px; color: var(--text-secondary); line-height: 1.6;
+}
+.pdf-result-match:hover { background: rgba(123,45,139,0.12); color: var(--text-primary); }
+.pdf-result-match mark {
+  background: rgba(123,45,139,0.5); color: var(--text-primary);
+  border-radius: 2px; padding: 0 2px;
+}
+
 /* ─── Friends View Enhanced ─── */
 .friends-modal { width: 1100px; max-width: 97vw; max-height: 90vh; display: flex; flex-direction: column; }
 .friends-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(340px, 1fr)); gap: 14px; padding: 16px 20px; flex: 1; overflow-y: auto; }

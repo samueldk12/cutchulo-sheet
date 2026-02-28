@@ -226,6 +226,7 @@ function initSchema() {
     "ALTER TABLE characters ADD COLUMN cash TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN assets TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN spending_level TEXT DEFAULT ''",
+    "ALTER TABLE characters ADD COLUMN is_friend INTEGER DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN occ_points INTEGER DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN int_points INTEGER DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN game_points INTEGER DEFAULT 0",
@@ -339,7 +340,7 @@ function createDefaultSkills(characterId, dex, edu) {
 // ─── Character Queries ───────────────────────────────────────
 const characterQueries = {
   listAll() {
-    return query('SELECT id, uuid, name, player, occupation, age FROM characters ORDER BY updated_at DESC');
+    return query('SELECT id, uuid, name, player, occupation, age FROM characters WHERE (is_friend = 0 OR is_friend IS NULL) ORDER BY updated_at DESC');
   },
 
   getById(id) {
@@ -396,8 +397,8 @@ const characterQueries = {
       INSERT INTO characters
         (uuid, name, player, occupation, age, gender, residence, birthplace,
          str, dex, int_val, con, app, pow, siz, edu, luck,
-         hp_current, hp_max, mp_current, mp_max, san_current, san_max)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+         hp_current, hp_max, mp_current, mp_max, san_current, san_max, is_friend)
+      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         uuid,
         data.name || 'Importado', data.player || '', data.occupation || '',
@@ -408,6 +409,7 @@ const characterQueries = {
         data.hp_current ?? hpMax, hpMax,
         data.mp_current ?? mpMax, mpMax,
         data.san_current ?? sanVal, sanVal,
+        data.is_friend || 0,
       ]
     );
     const id = lastInsertId();

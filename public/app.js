@@ -2032,11 +2032,10 @@ function setupFriends() {
       const parsed = JSON.parse(text);
       const charData = parsed.character || parsed;
       if (!charData.name) { alert('JSON inválido: campo "name" não encontrado'); return; }
-      const imported = await api.post('/api/import', { character: charData });
-      state.characters = await api.get('/api/characters');
-      renderCharacterList();
+      // Always treat file imports from friends section as friend exports
+      const imported = await api.post('/api/import', { character: charData, isFriendExport: true });
       loadFriendCharacters();
-      alert(`"${imported.name}" importado/atualizado com sucesso!`);
+      alert(`"${imported.name}" adicionado como amigo!`);
     } catch (err) { alert('Erro ao importar amigo: ' + err.message); }
     e.target.value = '';
   });
@@ -2459,18 +2458,24 @@ async function checkShareParam() {
     const charData = parsed.character || parsed;
     if (!charData.name) return;
     const evidenceItems = parsed.evidence || [];
-    const isFriend = parsed.isFriendExport;
+    const isFriend = !!parsed.isFriendExport;
     let msg = isFriend
-      ? `Deseja importar o personagem amigo "${charData.name}"?`
+      ? `Deseja importar o personagem amigo "${charData.name}"? (aparecerá apenas na vista de Amigos)`
       : `Deseja importar o personagem "${charData.name}" via link compartilhado?`;
     if (evidenceItems.length > 0) msg += `\n(inclui ${evidenceItems.length} evidência(s))`;
     if (!confirm(msg)) return;
-    const imported = await api.post('/api/import', { character: charData });
-    const existingIdx = state.characters.findIndex(c => c.id === imported.id);
-    const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
-    if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
-    renderCharacterList();
-    selectCharacter(imported.id);
+    const imported = await api.post('/api/import', { character: charData, isFriendExport: isFriend });
+    if (isFriend) {
+      // Friend: only refresh friends grid, don't add to sidebar
+      loadFriendCharacters();
+      alert(`"${imported.name}" adicionado como amigo!`);
+    } else {
+      const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+      const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+      if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
+      renderCharacterList();
+      selectCharacter(imported.id);
+    }
     if (evidenceItems.length > 0) {
       await api.post('/api/evidence/import', { evidence: evidenceItems });
       evidenceState.items = await api.get('/api/evidence');
@@ -2516,13 +2521,20 @@ function setupImportLinkModal() {
       if (!parsed) throw new Error('Link ou código inválido');
       const charData = parsed.character || parsed;
       if (!charData.name) throw new Error('Personagem sem nome no link');
-      const imported = await api.post('/api/import', { character: charData });
-      const existingIdx = state.characters.findIndex(c => c.id === imported.id);
-      const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
-      if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
-      renderCharacterList();
-      await selectCharacter(imported.id);
-      let lines = [`✓ Personagem <strong>"${imported.name}"</strong> ${imported.wasUpdated ? 'atualizado' : 'importado'}!`];
+      const isFriend = !!parsed.isFriendExport;
+      const imported = await api.post('/api/import', { character: charData, isFriendExport: isFriend });
+      let lines = [];
+      if (isFriend) {
+        loadFriendCharacters();
+        lines.push(`✓ Amigo <strong>"${imported.name}"</strong> importado! (vista de Amigos)`);
+      } else {
+        const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+        const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+        if (existingIdx >= 0) state.characters[existingIdx] = entry; else state.characters.unshift(entry);
+        renderCharacterList();
+        await selectCharacter(imported.id);
+        lines.push(`✓ Personagem <strong>"${imported.name}"</strong> ${imported.wasUpdated ? 'atualizado' : 'importado'}!`);
+      }
       const evidenceItems = parsed.evidence || [];
       if (evidenceItems.length > 0) {
         await api.post('/api/evidence/import', { evidence: evidenceItems });
@@ -2541,17 +2553,35 @@ function setupImportLinkModal() {
 // CREDIT RATING → CÁLCULO DE BENS E RIQUEZA
 // ══════════════════════════════════════════════════════════════
 
-// CoC 7e — Tabela de Credit Rating (valores em dólares de 1920)
-const CR_TABLE = [
-  { min: 0,  max: 0,  status: 'Pauper',       spending: '$0.50/dia', cash: '$0.50',   assets: '$0 – $1' },
-  { min: 1,  max: 9,  status: 'Pobre',         spending: '$1–2/dia',  cash: '$1–9',    assets: '$2–18' },
-  { min: 10, max: 29, status: 'Médio',          spending: '$10/dia',   cash: '$10–99',  assets: '$100–499' },
-  { min: 30, max: 49, status: 'Confortável',    spending: '$20/dia',   cash: '$50–299', assets: '$500–4.999' },
-  { min: 50, max: 69, status: 'Próspero',       spending: '$50/dia',   cash: '$500–1.999', assets: '$5.000–49.999' },
-  { min: 70, max: 89, status: 'Rico',           spending: '$500/dia',  cash: '$2.000–9.999', assets: '$50.000–499.999' },
-  { min: 90, max: 98, status: 'Muito Rico',     spending: '$2.000/dia',cash: '$10.000–99.999', assets: '$500.000–5.000.000' },
-  { min: 99, max: 99, status: 'Super Rico',     spending: 'Sem limite',cash: '$250.000+', assets: '$5.000.000+' },
+// CoC 7e — Status labels por faixa de Credit Rating
+const CR_STATUS = [
+  { min: 0,  max: 0,  status: 'Pauper (Indigente)' },
+  { min: 1,  max: 9,  status: 'Pobre' },
+  { min: 10, max: 29, status: 'Médio' },
+  { min: 30, max: 49, status: 'Confortável' },
+  { min: 50, max: 69, status: 'Próspero' },
+  { min: 70, max: 89, status: 'Rico' },
+  { min: 90, max: 98, status: 'Muito Rico' },
+  { min: 99, max: 99, status: 'Super Rico' },
 ];
+
+// CoC 7e exact formulas (dólares de 1920):
+//   Dinheiro em Mãos = CR × 2
+//   Patrimônio       = CR × 25
+//   Gasto Diário     = CR / 5  (mínimo $0,50)
+function _crExact(cr) {
+  const fmt = n => n >= 1000
+    ? '$' + n.toLocaleString('pt-BR')
+    : n === 0 ? '$0'
+    : n < 1 ? '$0,50'
+    : '$' + n.toFixed(0);
+  if (cr === 99) return { spending: 'Sem limite', cash: '$250.000+', assets: '$5.000.000+' };
+  return {
+    spending: fmt(Math.max(0.5, cr / 5)) + '/dia',
+    cash:     fmt(cr * 2),
+    assets:   fmt(cr * 25),
+  };
+}
 
 function setupCreditRating() {
   $('#btn-calc-cr')?.addEventListener('click', calcCreditRating);
@@ -2562,25 +2592,26 @@ function calcCreditRating() {
   const crSkill = state.current.skills?.find(s => s.name.includes('Credit Rating'));
   if (!crSkill) { alert('Habilidade "Credit Rating" não encontrada.'); return; }
   const crVal = crSkill.value || crSkill.base_value || 0;
-  const row = CR_TABLE.find(r => crVal >= r.min && crVal <= r.max) || CR_TABLE[0];
+  const statusRow = CR_STATUS.find(r => crVal >= r.min && crVal <= r.max) || CR_STATUS[0];
+  const { spending, cash, assets } = _crExact(crVal);
 
   const resultEl = $('#cr-result');
   if (resultEl) {
     resultEl.style.display = 'block';
     resultEl.innerHTML = `
       <div class="cr-result-inner">
-        <div class="cr-result-status"><strong>Credit Rating: ${crVal}%</strong> — ${row.status}</div>
+        <div class="cr-result-status"><strong>Credit Rating: ${crVal}%</strong> — ${statusRow.status}</div>
         <div class="cr-result-row">
-          <span class="cr-label">Gasto Diário:</span><span class="cr-val">${row.spending}</span>
-          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="spending_level" data-val="${row.spending}">Aplicar</button>
+          <span class="cr-label">Gasto Diário:</span><span class="cr-val">${spending}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="spending_level" data-val="${spending}">Aplicar</button>
         </div>
         <div class="cr-result-row">
-          <span class="cr-label">Dinheiro em Mãos:</span><span class="cr-val">${row.cash}</span>
-          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="cash" data-val="${row.cash}">Aplicar</button>
+          <span class="cr-label">Dinheiro em Mãos:</span><span class="cr-val">${cash}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="cash" data-val="${cash}">Aplicar</button>
         </div>
         <div class="cr-result-row">
-          <span class="cr-label">Patrimônio:</span><span class="cr-val">${row.assets}</span>
-          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="assets" data-val="${row.assets}">Aplicar</button>
+          <span class="cr-label">Patrimônio:</span><span class="cr-val">${assets}</span>
+          <button class="btn btn-xs btn-ghost cr-apply-btn" data-field="assets" data-val="${assets}">Aplicar</button>
         </div>
       </div>`;
 
@@ -2891,6 +2922,7 @@ async function init() {
   setupNpcExportImport();
   setupGmEnhancements();
   setupImportLinkModal();
+  setupPdfSearch();
   // Load catalog for weapon autocomplete
   try {
     catalogState.list = await api.get('/api/weapon-catalog');
@@ -2904,6 +2936,70 @@ async function init() {
   // Populate weapon presets datalist (built-in)
   const dl = $('#weapon-presets');
   if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
+}
+
+// ══════════════════════════════════════════════════════════════
+// BUSCA EM PDFs — Ctrl+K
+// ══════════════════════════════════════════════════════════════
+
+function _highlightMatch(text, q) {
+  const esc = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  return text.replace(new RegExp(esc, 'gi'), m => `<mark>${m}</mark>`);
+}
+
+function setupPdfSearch() {
+  const overlay = $('#pdf-search-overlay');
+  const input   = $('#pdf-search-input');
+  const results = $('#pdf-search-results');
+  if (!overlay) return;
+
+  const open  = () => { overlay.classList.add('open'); setTimeout(() => input?.focus(), 50); };
+  const close = () => { overlay.classList.remove('open'); };
+
+  // Ctrl+K global shortcut (also triggered from sidebar btn-books if we add one)
+  document.addEventListener('keydown', e => {
+    if ((e.ctrlKey || e.metaKey) && e.key === 'k') {
+      e.preventDefault();
+      overlay.classList.contains('open') ? close() : open();
+    }
+    if (e.key === 'Escape' && overlay.classList.contains('open')) close();
+  });
+  overlay.addEventListener('click', e => { if (e.target === overlay) close(); });
+
+  let debounce;
+  input?.addEventListener('input', () => {
+    clearTimeout(debounce);
+    const q = input.value.trim();
+    if (q.length < 2) {
+      results.innerHTML = '<div class="pdf-search-hint">Digite pelo menos 2 caracteres para buscar...</div>';
+      return;
+    }
+    results.innerHTML = '<div class="pdf-searching">🔄 Buscando...</div>';
+    debounce = setTimeout(async () => {
+      try {
+        const data = await api.get(`/api/books/search?q=${encodeURIComponent(q)}`);
+        if (!data.length) {
+          results.innerHTML = '<div class="pdf-no-results">Nenhum resultado encontrado.</div>';
+          return;
+        }
+        results.innerHTML = data.map(r => `
+          <div class="pdf-result-book">
+            <div class="pdf-result-book-name">📄 ${r.book} <span style="font-size:11px;color:var(--text-muted)">(${r.matches.length} trecho${r.matches.length > 1 ? 's' : ''})</span></div>
+            ${r.matches.map(m => `
+              <div class="pdf-result-match" data-book="${encodeURIComponent(r.book)}">...${_highlightMatch(m.context, q)}...</div>
+            `).join('')}
+          </div>`).join('');
+        results.querySelectorAll('.pdf-result-match').forEach(el =>
+          el.addEventListener('click', () => {
+            openBookViewer(decodeURIComponent(el.dataset.book));
+            close();
+          })
+        );
+      } catch (err) {
+        results.innerHTML = `<div class="pdf-no-results">Erro: ${err.message}</div>`;
+      }
+    }, 400);
+  });
 }
 
 // Patch the friends reload button
@@ -2920,11 +3016,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const parsed = JSON.parse(json);
       const charData = parsed.character || parsed;
       if (!charData.name) throw new Error('Personagem inválido');
-      api.post('/api/import', { character: charData }).then(imported => {
-        state.characters = [...state.characters.filter(c => c.id !== imported.id), { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age }];
-        renderCharacterList();
+      api.post('/api/import', { character: charData, isFriendExport: true }).then(imported => {
         loadFriendCharacters();
-        alert(`"${imported.name}" importado com sucesso!`);
+        alert(`"${imported.name}" adicionado como amigo!`);
       });
     } catch (e) { alert('Erro: ' + e.message); }
   });

@@ -2,6 +2,7 @@ const express = require('express');
 const path = require('path');
 const fs = require('fs');
 const multer = require('multer');
+const pdfParse = require('pdf-parse');
 const {
   initDb,
   characterQueries, skillQueries, weaponQueries,
@@ -114,7 +115,7 @@ app.get('/api/export-friend/:id', (req, res) => {
 
 app.post('/api/import', (req, res) => {
   try {
-    const { character } = req.body;
+    const { character, isFriendExport } = req.body;
     if (!character?.name) return res.status(400).json({ error: 'JSON inválido: campo "character" obrigatório' });
 
     // Keep uuid for deduplication but strip local IDs
@@ -123,12 +124,14 @@ app.post('/api/import', (req, res) => {
     delete character.created_at;
     delete character.updated_at;
     if (uuid) character.uuid = uuid;
+    // Mark as friend if exported as friend
+    if (isFriendExport) character.is_friend = 1;
 
     // Check BEFORE import so wasUpdated is correct
     const existingByUuid = uuid ? characterQueries.getByUuid(uuid) : null;
     const id = characterQueries.import(character);
     const result = characterQueries.getById(id);
-    res.status(201).json({ ...result, wasUpdated: !!existingByUuid });
+    res.status(201).json({ ...result, wasUpdated: !!existingByUuid, isFriend: !!isFriendExport });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -255,6 +258,47 @@ function rollDice(expression, bonus = 0, penalty = 0) {
 }
 
 // ─── Livros (PDFs) ───────────────────────────────────────────
+
+// Text cache: Map<filename:mtime, { text, pages }>
+const pdfTextCache = new Map();
+
+async function extractPdfText(filename) {
+  const fp = path.join(BOOKS_DIR, filename);
+  const stat = fs.statSync(fp);
+  const key = `${filename}:${stat.mtime.getTime()}`;
+  if (pdfTextCache.has(key)) return pdfTextCache.get(key);
+  const buf = fs.readFileSync(fp);
+  const data = await pdfParse(buf);
+  const result = { text: data.text, pages: data.numpages };
+  pdfTextCache.set(key, result);
+  return result;
+}
+
+app.get('/api/books/search', async (req, res) => {
+  try {
+    const q = (req.query.q || '').trim();
+    if (!q || q.length < 2) return res.json([]);
+    const qLow = q.toLowerCase();
+    const files = fs.readdirSync(BOOKS_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
+    const results = [];
+    for (const file of files) {
+      try {
+        const { text } = await extractPdfText(file);
+        const lower = text.toLowerCase();
+        const matches = [];
+        let idx = 0;
+        while ((idx = lower.indexOf(qLow, idx)) !== -1 && matches.length < 5) {
+          const start = Math.max(0, idx - 120);
+          const end   = Math.min(text.length, idx + q.length + 120);
+          matches.push({ context: text.slice(start, end).replace(/\s+/g, ' ').trim(), pos: idx });
+          idx += q.length;
+        }
+        if (matches.length) results.push({ book: file, matches });
+      } catch { /* skip unreadable PDF */ }
+    }
+    res.json(results);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
 app.get('/api/books', (req, res) => {
   try {
