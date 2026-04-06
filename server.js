@@ -151,6 +151,17 @@ app.post('/api/auth/register', async (req, res) => {
 
     const user = await authQueries.getById(userId);
     const token = jwt.sign({ userId: user.id, username: user.username, is_master: !!user.is_master }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+
+    // If first user (master), create a default session
+    if (isFirst) {
+      try {
+        const sessId = await sessionQueries.create(userId, { name: 'Minha Sessao', role: 'master', notes: '' });
+        await sessionQueries.activate(sessId);
+        const shareToken = await sessionQueries.generateShareToken(sessId);
+        return res.status(201).json({ token, user: { id: user.id, username: user.username, is_master: true }, hasSession: true });
+      } catch (e) { /* ignore */ }
+    }
+
     res.status(201).json({ token, user: { id: user.id, username: user.username, is_master: !!user.is_master } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

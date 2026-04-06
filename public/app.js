@@ -234,7 +234,7 @@ async function doLogin() {
     localStorage.setItem('token', data.token);
     hideLoginOverlay();
     startApp();
-  } catch (e) { showLoginMsg('Erro de conexao'); }
+  } catch (e) { showLoginMsg('Erro de conexao'); console.error('Login error:', e); }
 }
 
 async function doRegister() {
@@ -242,18 +242,21 @@ async function doRegister() {
   const password = document.getElementById('login-password').value;
   if (!username || !password) { showLoginMsg('Preencha os campos'); return; }
   try {
+    showLoginMsg('Criando conta...', false);
+    console.log('[auth] Registering:', username);
     const r = await fetch('/api/auth/register', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username, password }),
     });
     const data = await r.json();
+    console.log('[auth] Register response:', r.status, data);
     if (!r.ok) { showLoginMsg(data.error || 'Erro ao criar conta'); return; }
     state.authToken = data.token;
     localStorage.setItem('token', data.token);
     showLoginMsg('Conta criada! Entrando...', false);
     setTimeout(() => { hideLoginOverlay(); startApp(); }, 500);
-  } catch (e) { showLoginMsg('Erro de conexao'); }
+  } catch (e) { showLoginMsg('Erro de conexao: ' + e.message); console.error('Register error:', e); }
 }
 
 // ─── SSE: Real-time session events ────────────────────────────
