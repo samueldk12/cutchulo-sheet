@@ -4,14 +4,12 @@ const fs = require('fs');
 const { randomUUID } = require('crypto');
 const multer = require('multer');
 const jwt = require('jsonwebtoken');
-const bcrypt = require('bcryptjs');
 const {
   initDb,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
   npcQueries, weaponCatalogQueries, sessionQueries,
   sessionLogQueries, annotationQueries, authQueries,
-  DEFAULT_CONFIG,
 } = require('./database');
 
 const app = express();
@@ -33,6 +31,11 @@ function authenticateToken(req, res, next) {
   }
 }
 
+function requireMaster(req, res, next) {
+  if (!req.user.is_master) return res.status(403).json({ error: 'Apenas mestres podem executar esta acao' });
+  next();
+}
+
 function optionalAuth(req, res, next) {
   const authHeader = req.headers.authorization;
   const token = authHeader && authHeader.split(' ')[1];
@@ -43,7 +46,6 @@ function optionalAuth(req, res, next) {
 }
 
 // ─── Books directory (serverless-safe) ────────────────────────
-// In serverless (/var/task is read-only), use /tmp or a configurable path
 const BOOKS_DIR = process.env.BOOKS_PATH || (() => {
   try {
     const p = path.join(__dirname, 'books');
@@ -54,7 +56,6 @@ const BOOKS_DIR = process.env.BOOKS_PATH || (() => {
     return '/tmp/books';
   }
 })();
-
 const DATA_DIR = (() => {
   try {
     const p = path.join(__dirname, 'data');
@@ -65,9 +66,8 @@ const DATA_DIR = (() => {
     return '/tmp/data';
   }
 })();
-
 const SHARES_DIR = path.join(DATA_DIR, 'shares');
-if (!fs.existsSync(SHARES_DIR)) try { fs.mkdirSync(SHARES_DIR, { recursive: true }); } catch { /* sqlite data dir is created by db init */ }
+if (!fs.existsSync(SHARES_DIR)) try { fs.mkdirSync(SHARES_DIR, { recursive: true }); } catch {}
 
 const bookStorage = multer.diskStorage({
   destination: (_, __, cb) => cb(null, BOOKS_DIR),
@@ -85,13 +85,51 @@ const bookUpload = multer({
 
 app.use(express.json({ limit: '10mb' }));
 
-// Serve static with error handling for serverless paths
 try {
   app.use(express.static(path.join(__dirname, 'public')));
   app.use('/books', express.static(BOOKS_DIR, { dotfiles: 'deny' }));
   app.use('/pdfjs', express.static(path.join(__dirname, 'public', 'pdfjs')));
   app.use('/build', express.static(path.join(__dirname, 'public', 'pdfjs', 'build')));
-} catch { /* ignore static errors in serverless */ }
+} catch { /* serverless */ }
+
+// ─── SSE: Real-time session events ────────────────────────────
+const sessionSubscribers = new Map(); // token -> Array of { res, id }
+
+app.get('/api/session/events', optionalAuth, (req, res) => {
+  const token = req.query.token;
+  if (!token) return res.status(400).json({ error: 'Token necessario' });
+
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders?.();
+
+  const id = randomUUID();
+  const sub = { id, res, userId: req.user?.userId || null };
+
+  if (!sessionSubscribers.has(token)) sessionSubscribers.set(token, []);
+  sessionSubscribers.get(token).push(sub);
+
+  res.write(`data: ${JSON.stringify({ type: 'connected' })}\n\n`);
+
+  const cleanup = () => {
+    const subs = sessionSubscribers.get(token) || [];
+    const idx = subs.findIndex(s => s.id === id);
+    if (idx >= 0) subs.splice(idx, 1);
+    if (!subs.length) sessionSubscribers.delete(token);
+  };
+
+  req.on('close', cleanup);
+  req.on('error', cleanup);
+});
+
+function broadcastEvent(token, event) {
+  const subs = sessionSubscribers.get(token) || [];
+  const data = `data: ${JSON.stringify(event)}\n\n`;
+  for (const sub of subs) {
+    try { sub.res.write(data); } catch { /* dropped */ }
+  }
+}
 
 // ─── Auth ────────────────────────────────────────────────────
 
@@ -100,14 +138,20 @@ app.post('/api/auth/register', async (req, res) => {
     const { username, password, is_master } = req.body;
     if (!username || !password) return res.status(400).json({ error: 'Username e password obrigatorios' });
     if (password.length < 4) return res.status(400).json({ error: 'Senha deve ter no minimo 4 caracteres' });
+
+    // If this is the first user, make them master automatically
+    const allUsers = await authQueries.getAllForMaster();
+    const isFirst = allUsers.length === 0;
+
     const result = await authQueries.register(username.toLowerCase().trim(), password);
     if (result.error) return res.status(400).json({ error: result.error });
 
     const userId = result.id;
-    if (is_master) await authQueries.setMaster(userId, true);
+    if (is_master || isFirst) await authQueries.setMaster(userId, true);
 
-    const token = jwt.sign({ userId: result.id, username: result.username, is_master: !!result.is_master }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
-    res.status(201).json({ token, user: { id: result.id, username: result.username, is_master: !!result.is_master } });
+    const user = await authQueries.getById(userId);
+    const token = jwt.sign({ userId: user.id, username: user.username, is_master: !!user.is_master }, JWT_SECRET, { expiresIn: JWT_EXPIRY });
+    res.status(201).json({ token, user: { id: user.id, username: user.username, is_master: !!user.is_master } });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -130,19 +174,15 @@ app.get('/api/auth/me', authenticateToken, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/auth/users', authenticateToken, async (req, res) => {
-  // Only masters can list all users
-  if (!req.user.is_master) return res.status(403).json({ error: 'Apenas mestres podem ver usuarios' });
+app.get('/api/auth/users', authenticateToken, requireMaster, async (req, res) => {
   try {
-    // For now return friends as "users"
-    const friends = await characterQueries.listFriends();
-    res.json({ users: friends });
+    const allUsers = await authQueries.getAllForMaster();
+    res.json({ users: allUsers });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Session Sharing ─────────────────────────────────────────
 
-// Master creates/gets share token for an active session
 app.post('/api/sessions/:id/share', authenticateToken, async (req, res) => {
   try {
     if (!req.user.is_master) return res.status(403).json({ error: 'Apenas mestres podem compartilhar sessoes' });
@@ -158,59 +198,42 @@ app.post('/api/sessions/:id/share', authenticateToken, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Public: join session via share token
 app.get('/api/session/join/:token', optionalAuth, async (req, res) => {
   try {
     const session = await sessionQueries.getByShareToken(req.params.token);
     if (!session) return res.status(404).json({ error: 'Sessao nao encontrada ou expirada' });
+    const participants = await sessionQueries.getParticipants(req.params.token);
+    res.json(participants);
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
 
-    // Get characters in this session
-    const sessionChars = await characterQueries.listBySessionToken(req.params.token);
-    const detailChars = await Promise.all(sessionChars.map(c => characterQueries.getById(c.id)));
-
-    res.json({
-      session: {
-        id: session.id,
-        name: session.name,
-        notes: session.notes,
-        share_token: session.share_token,
-      },
-      characters: detailChars,
-      // If the joining user is logged in and has a character, they're already in session
-      // Otherwise they need to create one joined to the session
+app.post('/api/session/join/:token/character', optionalAuth, async (req, res) => {
+  try {
+    const userId = req.user?.userId || 0;
+    const charData = { ...req.body, user_id: userId };
+    const character = await sessionQueries.joinAsCharacter(userId, req.params.token, charData);
+    res.status(201).json(character);
+    // Broadcast join event
+    broadcastEvent(req.params.token, {
+      type: 'player_joined',
+      character: { id: character.id, name: character.name, player: character.player },
     });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Create a character as a friend, joined to session
-app.post('/api/session/join/:token/character', async (req, res) => {
-  try {
-    const session = await sessionQueries.getByShareToken(req.params.token);
-    if (!session) return res.status(404).json({ error: 'Sessao nao encontrada ou expirada' });
-    const id = await characterQueries.create({ ...req.body, is_friend: true, session_token: req.params.token });
-    const c = await characterQueries.getById(id);
-    res.status(201).json(c);
-  } catch (e) { res.status(500).json({ error: e.message }); }
-});
-
-// Master sees active session with all players
 app.get('/api/sessions/active/players', authenticateToken, async (req, res) => {
   try {
-    const active = await sessionQueries.getActive();
+    const active = await sessionQueries.getActive(req.user.userId);
     if (!active) return res.status(404).json({ error: 'Nenhuma sessao ativa' });
-
     const shareToken = active.share_token;
     const chars = shareToken ? await characterQueries.listBySessionToken(shareToken) : [];
     const detailChars = await Promise.all(chars.map(c => characterQueries.getById(c.id)));
-
     res.json({ session: active, players: detailChars });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-// Master can kick a character from a session
-app.delete('/api/session/character/:id', authenticateToken, async (req, res) => {
+app.delete('/api/session/character/:id', authenticateToken, requireMaster, async (req, res) => {
   try {
-    if (!req.user.is_master) return res.status(403).json({ error: 'Apenas mestres podem remover jogadores' });
     await characterQueries.update(+req.params.id, { session_token: null, is_friend: true });
     res.json({ success: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -228,28 +251,29 @@ app.get('/s/:token', (req, res) => {
 
 // ─── Personagens ─────────────────────────────────────────────
 
-app.get('/api/characters', async (req, res) => {
-  try { res.json(await characterQueries.listAll()); }
+app.get('/api/characters', authenticateToken, async (req, res) => {
+  try { res.json(await characterQueries.listAll(req.user.userId)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/characters/:id', async (req, res) => {
+app.get('/api/characters/:id', authenticateToken, async (req, res) => {
   try {
     const c = await characterQueries.getById(+req.params.id);
     if (!c) return res.status(404).json({ error: 'Personagem nao encontrado' });
+    // Allow viewing friends too
     res.json(c);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/characters', async (req, res) => {
+app.post('/api/characters', authenticateToken, async (req, res) => {
   try {
-    const id = await characterQueries.create(req.body);
+    const id = await characterQueries.create({ ...req.body, user_id: req.user.userId });
     const c = await characterQueries.getById(id);
     res.status(201).json(c);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/characters/:id', async (req, res) => {
+app.put('/api/characters/:id', authenticateToken, async (req, res) => {
   try {
     const id = +req.params.id;
     const data = req.body;
@@ -258,18 +282,36 @@ app.put('/api/characters/:id', async (req, res) => {
     if (data.edu !== undefined)
       await skillQueries.updateByName(id, 'Language (Own)', data.edu);
     await characterQueries.update(id, data);
-    res.json(await characterQueries.getById(id));
+    const c = await characterQueries.getById(id);
+    // Broadcast vital changes to session
+    const vitalKeys = ['hp_current', 'hp_max', 'mp_current', 'mp_max', 'san_current', 'san_max'];
+    const hasVital = vitalKeys.some(k => data[k] !== undefined);
+    if (hasVital && c?.session_token) {
+      try {
+        broadcastEvent(c.session_token, {
+          type: 'vital_change',
+          character: { id: c.id, name: c.name, player: c.player },
+          vitals: {
+            hp_current: c.hp_current, hp_max: c.hp_max,
+            mp_current: c.mp_current, mp_max: c.mp_max,
+            san_current: c.san_current, san_max: c.san_max,
+          },
+          timestamp: new Date().toISOString(),
+        });
+      } catch { /* ignore */ }
+    }
+    res.json(c);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/characters/:id', async (req, res) => {
+app.delete('/api/characters/:id', authenticateToken, async (req, res) => {
   try { await characterQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Export / Import ─────────────────────────────────────────
 
-app.get('/api/export/:id', async (req, res) => {
+app.get('/api/export/:id', authenticateToken, async (req, res) => {
   try {
     const c = await characterQueries.getById(+req.params.id);
     if (!c) return res.status(404).json({ error: 'Personagem nao encontrado' });
@@ -280,11 +322,10 @@ app.get('/api/export/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/export-friend/:id', async (req, res) => {
+app.get('/api/export-friend/:id', authenticateToken, async (req, res) => {
   try {
     const c = await characterQueries.getById(+req.params.id);
     if (!c) return res.status(404).json({ error: 'Personagem nao encontrado' });
-
     const loreFields = [
       'appearance_desc','ideology','significant_people','meaningful_locations',
       'treasured_possessions','traits','injuries_scars','phobias_manias',
@@ -292,7 +333,6 @@ app.get('/api/export-friend/:id', async (req, res) => {
     ];
     const friendChar = { ...c };
     loreFields.forEach(f => delete friendChar[f]);
-
     const safeName = (c.name || 'personagem').replace(/[^a-z0-9_\-\s]/gi, '_');
     res.setHeader('Content-Disposition', `attachment; filename="${safeName}_amigo.json"`);
     res.setHeader('Content-Type', 'application/json');
@@ -300,18 +340,15 @@ app.get('/api/export-friend/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/import', async (req, res) => {
+app.post('/api/import', authenticateToken, async (req, res) => {
   try {
     const { character, isFriendExport } = req.body;
     if (!character?.name) return res.status(400).json({ error: 'JSON invalid: campo "character" obrigatorio' });
-
     const uuid = character.uuid;
-    delete character.id;
-    delete character.created_at;
-    delete character.updated_at;
+    delete character.id; delete character.created_at; delete character.updated_at;
     if (uuid) character.uuid = uuid;
     if (isFriendExport) character.is_friend = 1;
-
+    character.user_id = req.user.userId;
     const existingByUuid = uuid ? await characterQueries.getByUuid(uuid) : null;
     const id = await characterQueries.import(character);
     const result = await characterQueries.getById(id);
@@ -319,19 +356,13 @@ app.post('/api/import', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/shares', async (req, res) => {
+app.post('/api/shares', authenticateToken, async (req, res) => {
   try {
     const payload = req.body;
-    if (!payload?.character?.name) {
-      return res.status(400).json({ error: 'Payload de compartilhamento invalido' });
-    }
+    if (!payload?.character?.name) return res.status(400).json({ error: 'Payload de compartilhamento invalido' });
     const id = randomUUID();
     const filePath = path.join(SHARES_DIR, `${id}.json`);
-    fs.writeFileSync(filePath, JSON.stringify({
-      ...payload,
-      id,
-      createdAt: new Date().toISOString(),
-    }));
+    fs.writeFileSync(filePath, JSON.stringify({ ...payload, id, createdAt: new Date().toISOString() }));
     res.status(201).json({ id });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -341,104 +372,118 @@ app.get('/api/shares/:id', async (req, res) => {
     const safeId = String(req.params.id || '').replace(/[^a-zA-Z0-9-]/g, '');
     if (!safeId) return res.status(400).json({ error: 'ID de compartilhamento invalido' });
     const filePath = path.join(SHARES_DIR, `${safeId}.json`);
-    if (!fs.existsSync(filePath)) {
-      return res.status(404).json({ error: 'Compartilhamento nao encontrado' });
-    }
+    if (!fs.existsSync(filePath)) return res.status(404).json({ error: 'Compartilhamento nao encontrado' });
     res.json(JSON.parse(fs.readFileSync(filePath, 'utf8')));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Habilidades ─────────────────────────────────────────────
 
-app.put('/api/skills/:id', async (req, res) => {
+app.put('/api/skills/:id', authenticateToken, async (req, res) => {
   try { await skillQueries.update(+req.params.id, req.body); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Armas ───────────────────────────────────────────────────
 
-app.post('/api/characters/:id/weapons', async (req, res) => {
+app.post('/api/characters/:id/weapons', authenticateToken, async (req, res) => {
   try { res.status(201).json({ id: await weaponQueries.create(+req.params.id) }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/weapons/:id', async (req, res) => {
+app.put('/api/weapons/:id', authenticateToken, async (req, res) => {
   try { await weaponQueries.update(+req.params.id, req.body); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/weapons/:id', async (req, res) => {
+app.delete('/api/weapons/:id', authenticateToken, async (req, res) => {
   try { await weaponQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Posses ──────────────────────────────────────────────────
 
-app.post('/api/characters/:id/possessions', async (req, res) => {
+app.post('/api/characters/:id/possessions', authenticateToken, async (req, res) => {
   try { res.status(201).json({ id: await possessionQueries.create(+req.params.id, req.body.item || '') }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/possessions/:id', async (req, res) => {
+app.put('/api/possessions/:id', authenticateToken, async (req, res) => {
   try { await possessionQueries.update(+req.params.id, req.body.item); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/possessions/:id', async (req, res) => {
+app.delete('/api/possessions/:id', authenticateToken, async (req, res) => {
   try { await possessionQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Dados ───────────────────────────────────────────────────
 
-app.post('/api/dice/roll', async (req, res) => {
+app.post('/api/dice/roll', authenticateToken, async (req, res) => {
   try {
     const { expression, characterId, bonus, penalty } = req.body;
     const result = rollDice(expression, bonus || 0, penalty || 0);
-    await diceQueries.addHistory(characterId, result.expression, result.total, JSON.stringify(result.rolls));
+    await diceQueries.addHistory(req.user.userId, characterId, result.expression, result.total, JSON.stringify(result.rolls));
+    // Broadcast dice roll to session
+    if (characterId) {
+      try {
+        const char = await characterQueries.getById(characterId);
+        const sessionToken = char?.session_token;
+        if (sessionToken) {
+          broadcastEvent(sessionToken, {
+            type: 'dice_roll',
+            player: char.player || 'Anonimo',
+            characterName: char.name || 'Desconhecido',
+            result,
+            timestamp: new Date().toISOString(),
+          });
+        }
+      } catch { /* ignore broadcast errors */ }
+    }
     res.json(result);
   } catch (e) { res.status(400).json({ error: e.message }); }
 });
 
-app.get('/api/dice/history', async (req, res) => {
+app.get('/api/dice/history', authenticateToken, async (req, res) => {
   try {
     const { characterId, limit } = req.query;
-    res.json(await diceQueries.getHistory(characterId ? +characterId : null, limit ? +limit : 20));
+    res.json(await diceQueries.getHistory(req.user.userId, characterId ? +characterId : null, limit ? +limit : 20));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Configurações ───────────────────────────────────────────
 
-app.get('/api/config', async (req, res) => {
+app.get('/api/config', authenticateToken, async (req, res) => {
   try { res.json(await configQueries.getAll()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/config', async (req, res) => {
+app.put('/api/config', authenticateToken, async (req, res) => {
   try {
     for (const [k, v] of Object.entries(req.body)) await configQueries.set(k, String(v));
     res.json(await configQueries.getAll());
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/config/reset', async (req, res) => {
+app.post('/api/config/reset', authenticateToken, async (req, res) => {
   try { res.json(await configQueries.resetToDefaults()); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Vista do Mestre ─────────────────────────────────────────
 
-app.get('/api/gm', async (req, res) => {
+app.get('/api/gm', authenticateToken, requireMaster, async (req, res) => {
   try {
-    const list = await characterQueries.listAll();
+    const list = await characterQueries.listAll(req.user.userId);
     const detailed = await Promise.all(list.map(c => characterQueries.getById(c.id)));
     res.json(detailed);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/friends', async (req, res) => {
+app.get('/api/friends', authenticateToken, async (req, res) => {
   try {
-    const list = await characterQueries.listFriends();
+    const list = await characterQueries.listFriends(req.user.userId);
     const detailed = await Promise.all(list.map(c => characterQueries.getById(c.id)));
     res.json(detailed);
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -450,12 +495,11 @@ function rollDice(expression, bonus = 0, penalty = 0) {
   const expr = expression.toLowerCase().trim();
   const match = expr.match(/^(\d*)d(\d+)([+-]\d+)?$/);
   if (!match) throw new Error(`Expressao invalida: ${expression}`);
-
-  const count    = parseInt(match[1] || '1');
-  const sides    = parseInt(match[2]);
+  const count = parseInt(match[1] || '1');
+  const sides = parseInt(match[2]);
   const modifier = parseInt(match[3] || '0');
-  if (count < 1 || count > 100)   throw new Error('Quantidade de dados: 1-100');
-  if (sides < 2 || sides > 1000)  throw new Error('Lados: 2-1000');
+  if (count < 1 || count > 100) throw new Error('Quantidade de dados: 1-100');
+  if (sides < 2 || sides > 1000) throw new Error('Lados: 2-1000');
 
   const rolls = Array.from({ length: count }, () => Math.floor(Math.random() * sides) + 1);
   let total = rolls.reduce((a, b) => a + b, 0) + modifier;
@@ -463,7 +507,7 @@ function rollDice(expression, bonus = 0, penalty = 0) {
 
   if (sides === 100 && (bonus > 0 || penalty > 0)) {
     const ones = (rolls[0] - 1) % 10;
-    const tens  = Math.floor((rolls[0] - 1) / 10) * 10;
+    const tens = Math.floor((rolls[0] - 1) / 10) * 10;
     const extraTens = Array.from({ length: Math.max(bonus, penalty) }, () => Math.floor(Math.random() * 10) * 10);
     bonusPenaltyRolls = extraTens;
     const allTens = [tens, ...extraTens];
@@ -489,10 +533,8 @@ async function extractPdfText(filename) {
   const stat = fs.statSync(fp);
   const key = `${filename}:${stat.mtime.getTime()}`;
   if (pdfTextCache.has(key)) return pdfTextCache.get(key);
-
   const pageStarts = [];
   let accumulated = '';
-
   const options = {
     pagerender: async (pageData) => {
       pageStarts.push(accumulated.length);
@@ -502,10 +544,8 @@ async function extractPdfText(filename) {
       return str;
     }
   };
-
   const buf = fs.readFileSync(fp);
   await pdfParse(buf, options);
-
   const result = { text: accumulated, pages: pageStarts.length, pageStarts };
   pdfTextCache.set(key, result);
   return result;
@@ -521,12 +561,11 @@ function getPage(pos, pageStarts) {
   return lo + 1;
 }
 
-app.get('/api/books/search', async (req, res) => {
+app.get('/api/books/search', authenticateToken, async (req, res) => {
   try {
-    const q       = (req.query.q || '').trim();
+    const q = (req.query.q || '').trim();
     const useRegex = req.query.regex === 'true';
     if (!q || q.length < 2) return res.json([]);
-
     let pattern;
     if (useRegex) {
       try { pattern = new RegExp(q, 'gi'); }
@@ -535,7 +574,6 @@ app.get('/api/books/search', async (req, res) => {
       const escaped = q.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
       pattern = new RegExp(escaped, 'gi');
     }
-
     const files = fs.readdirSync(BOOKS_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
     const results = [];
     for (const file of files) {
@@ -545,25 +583,20 @@ app.get('/api/books/search', async (req, res) => {
         let m;
         pattern.lastIndex = 0;
         while ((m = pattern.exec(text)) !== null && matches.length < 5) {
-          const idx   = m.index;
+          const idx = m.index;
           const start = Math.max(0, idx - 120);
-          const end   = Math.min(text.length, idx + m[0].length + 120);
-          const page  = getPage(idx, pageStarts);
-          matches.push({
-            context: text.slice(start, end).replace(/\s+/g, ' ').trim(),
-            pos: idx,
-            page,
-            matchText: m[0],
-          });
+          const end = Math.min(text.length, idx + m[0].length + 120);
+          const page = getPage(idx, pageStarts);
+          matches.push({ context: text.slice(start, end).replace(/\s+/g, ' ').trim(), pos: idx, page, matchText: m[0] });
         }
         if (matches.length) results.push({ book: file, matches });
-      } catch { /* skip unreadable PDF */ }
+      } catch { /* skip */ }
     }
     res.json(results);
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/books', (req, res) => {
+app.get('/api/books', authenticateToken, (req, res) => {
   try {
     const files = fs.readdirSync(BOOKS_DIR).filter(f => f.toLowerCase().endsWith('.pdf'));
     res.json(files.map(f => {
@@ -573,12 +606,12 @@ app.get('/api/books', (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/books/upload', bookUpload.single('pdf'), (req, res) => {
+app.post('/api/books/upload', authenticateToken, bookUpload.single('pdf'), (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Arquivo PDF necessario' });
   res.json({ name: req.file.filename, size: req.file.size });
 });
 
-app.delete('/api/books/:filename', (req, res) => {
+app.delete('/api/books/:filename', authenticateToken, (req, res) => {
   try {
     const safe = path.basename(req.params.filename);
     const fp = path.join(BOOKS_DIR, safe);
@@ -589,66 +622,63 @@ app.delete('/api/books/:filename', (req, res) => {
 
 // ─── Evidencias ──────────────────────────────────────────────
 
-app.get('/api/evidence/export', async (req, res) => {
+app.get('/api/evidence/export', authenticateToken, async (req, res) => {
   try {
-    const items = await evidenceQueries.listAll();
+    const items = await evidenceQueries.listAll(req.user.userId);
     res.json({ version: 1, exportedAt: new Date().toISOString(), evidence: items });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/evidence/import', (req, res) => {
+app.post('/api/evidence/import', authenticateToken, async (req, res) => {
   try {
     const { evidence } = req.body;
     if (!Array.isArray(evidence)) return res.status(400).json({ error: 'Campo "evidence" deve ser array' });
-    let count = 0;
     for (const item of evidence) {
-      const { title, description, session_tag, image } = item;
-      evidenceQueries.create({ title: title || 'Nova Evidencia', description: description || '', session_tag: session_tag || '', image: image || null });
-      count++;
+      await evidenceQueries.create(req.user.userId, { title: item.title || 'Nova Evidencia', description: item.description || '', session_tag: item.session_tag || '', image: item.image || null });
     }
-    res.json({ success: true, count });
+    res.json({ success: true, count: evidence.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/evidence', async (req, res) => {
-  try { res.json(await evidenceQueries.listAll()); }
+app.get('/api/evidence', authenticateToken, async (req, res) => {
+  try { res.json(await evidenceQueries.listAll(req.user.userId)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/evidence', async (req, res) => {
+app.post('/api/evidence', authenticateToken, async (req, res) => {
   try {
-    const id = await evidenceQueries.create(req.body);
+    const id = await evidenceQueries.create(req.user.userId, req.body);
     res.status(201).json(await evidenceQueries.getById(id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/evidence/:id', async (req, res) => {
+app.put('/api/evidence/:id', authenticateToken, async (req, res) => {
   try { await evidenceQueries.update(+req.params.id, req.body); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/evidence/:id', async (req, res) => {
+app.delete('/api/evidence/:id', authenticateToken, async (req, res) => {
   try { await evidenceQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── NPCs / Inimigos ─────────────────────────────────────────
 
-app.get('/api/npcs', async (req, res) => {
-  try { res.json(await npcQueries.listAll()); }
+app.get('/api/npcs', authenticateToken, async (req, res) => {
+  try { res.json(await npcQueries.listAll(req.user.userId)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/npcs/export', async (req, res) => {
+app.get('/api/npcs/export', authenticateToken, async (req, res) => {
   try {
-    const npcs = await Promise.all((await npcQueries.listAll()).map(n => npcQueries.getById(n.id)));
+    const npcs = await Promise.all((await npcQueries.listAll(req.user.userId)).map(n => npcQueries.getById(n.id)));
     res.setHeader('Content-Disposition', 'attachment; filename="npcs_export.json"');
     res.setHeader('Content-Type', 'application/json');
     res.json({ version: 1, exportedAt: new Date().toISOString(), npcs });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/npcs/export/:id', async (req, res) => {
+app.get('/api/npcs/export/:id', authenticateToken, async (req, res) => {
   try {
     const n = await npcQueries.getById(+req.params.id);
     if (!n) return res.status(404).json({ error: 'NPC nao encontrado' });
@@ -659,22 +689,21 @@ app.get('/api/npcs/export/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/npcs/import', async (req, res) => {
+app.post('/api/npcs/import', authenticateToken, async (req, res) => {
   try {
     const list = req.body.npcs || (req.body.npc ? [req.body.npc] : null);
     if (!Array.isArray(list)) return res.status(400).json({ error: 'Formato invalido: esperado { npcs: [...] }' });
     const ids = [];
     for (const n of list) {
-      delete n.id; delete n.created_at; delete n.updated_at;
-      delete n.createdat; delete n.updatedat;
-      const id = await npcQueries.create(n);
+      delete n.id; delete n.created_at; delete n.updated_at; delete n.createdat; delete n.updatedat;
+      const id = await npcQueries.create(req.user.userId, n);
       ids.push(id);
     }
     res.status(201).json({ success: true, count: ids.length, ids });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/npcs/:id', async (req, res) => {
+app.get('/api/npcs/:id', authenticateToken, async (req, res) => {
   try {
     const n = await npcQueries.getById(+req.params.id);
     if (!n) return res.status(404).json({ error: 'NPC nao encontrado' });
@@ -682,126 +711,143 @@ app.get('/api/npcs/:id', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/npcs', async (req, res) => {
+app.post('/api/npcs', authenticateToken, async (req, res) => {
   try {
-    const id = await npcQueries.create(req.body);
+    const id = await npcQueries.create(req.user.userId, req.body);
     res.status(201).json(await npcQueries.getById(id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/npcs/:id', async (req, res) => {
+app.put('/api/npcs/:id', authenticateToken, async (req, res) => {
   try {
     await npcQueries.update(+req.params.id, req.body);
     res.json(await npcQueries.getById(+req.params.id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/npcs/:id', async (req, res) => {
+app.delete('/api/npcs/:id', authenticateToken, async (req, res) => {
   try { await npcQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Catálogo de Armas ────────────────────────────────────────
 
-app.get('/api/weapon-catalog', async (req, res) => {
-  try { res.json(await weaponCatalogQueries.listAll()); }
+app.get('/api/weapon-catalog', authenticateToken, async (req, res) => {
+  try { res.json(await weaponCatalogQueries.listAll(req.user.userId)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/weapon-catalog', async (req, res) => {
+app.post('/api/weapon-catalog', authenticateToken, async (req, res) => {
   try {
     if (!req.body.name) return res.status(400).json({ error: 'name e obrigatorio' });
-    const id = await weaponCatalogQueries.create(req.body);
+    const id = await weaponCatalogQueries.create(req.user.userId, req.body);
     res.status(201).json(await weaponCatalogQueries.getById(id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/weapon-catalog/:id', async (req, res) => {
+app.put('/api/weapon-catalog/:id', authenticateToken, async (req, res) => {
   try { await weaponCatalogQueries.update(+req.params.id, req.body); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/weapon-catalog/:id', async (req, res) => {
+app.delete('/api/weapon-catalog/:id', authenticateToken, async (req, res) => {
   try { await weaponCatalogQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/weapon-catalog/export', async (req, res) => {
+app.get('/api/weapon-catalog/export', authenticateToken, async (req, res) => {
   try {
-    const items = await weaponCatalogQueries.listAll();
+    const items = await weaponCatalogQueries.listAll(req.user.userId);
     res.setHeader('Content-Disposition', 'attachment; filename="weapon_catalog.json"');
     res.setHeader('Content-Type', 'application/json');
     res.json({ version: 1, exportedAt: new Date().toISOString(), weapons: items });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/weapon-catalog/import', async (req, res) => {
+app.post('/api/weapon-catalog/import', authenticateToken, async (req, res) => {
   try {
     const weapons = req.body.weapons || req.body;
     if (!Array.isArray(weapons)) return res.status(400).json({ error: 'weapons deve ser um array' });
-    await weaponCatalogQueries.importBulk(weapons);
+    await weaponCatalogQueries.importBulk(req.user.userId, weapons);
     res.json({ success: true, count: weapons.length });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Sessões ──────────────────────────────────────────────────
 
-app.get('/api/sessions', async (req, res) => {
-  try { res.json(await sessionQueries.listAll()); }
+app.get('/api/sessions', authenticateToken, async (req, res) => {
+  try { res.json(await sessionQueries.listAll(req.user.userId)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.get('/api/sessions/active', async (req, res) => {
-  try { res.json(await sessionQueries.getActive() || null); }
+app.get('/api/sessions/active', authenticateToken, async (req, res) => {
+  try { res.json(await sessionQueries.getActive(req.user.userId) || null); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/sessions', async (req, res) => {
+app.post('/api/sessions', authenticateToken, async (req, res) => {
   try {
-    const id = await sessionQueries.create(req.body);
+    const id = await sessionQueries.create(req.user.userId, req.body);
     res.status(201).json(await sessionQueries.getById(id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/sessions/:id', async (req, res) => {
+app.put('/api/sessions/:id', authenticateToken, async (req, res) => {
   try {
     await sessionQueries.update(+req.params.id, req.body);
     res.json(await sessionQueries.getById(+req.params.id));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/sessions/:id/activate', async (req, res) => {
+app.put('/api/sessions/:id/activate', authenticateToken, async (req, res) => {
   try {
     await sessionQueries.activate(+req.params.id);
-    res.json(await sessionQueries.getById(+req.params.id));
+    const sess = await sessionQueries.getById(+req.params.id);
+    res.json(sess);
+    // Broadcast session change
+    if (sess?.share_token) {
+      broadcastEvent(sess.share_token, { type: 'session_activated', session: sess });
+    }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/sessions/:id', async (req, res) => {
+app.delete('/api/sessions/:id', authenticateToken, async (req, res) => {
   try { await sessionQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── Session Log ──────────────────────────────────────────────
-app.get('/api/sessions/:id/log', async (req, res) => {
+app.get('/api/sessions/:id/log', authenticateToken, async (req, res) => {
   try { res.json(await sessionLogQueries.list(+req.params.id)); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/sessions/:id/log', async (req, res) => {
+app.post('/api/sessions/:id/log', authenticateToken, async (req, res) => {
   try {
     const id = await sessionLogQueries.create(+req.params.id, req.body.content || '');
-    res.status(201).json({ id, session_id: +req.params.id, content: req.body.content || '', created_at: new Date().toISOString() });
+    const entry = { id, session_id: +req.params.id, content: req.body.content || '', created_at: new Date().toISOString() };
+    res.status(201).json(entry);
+    // Broadcast log entry
+    try {
+      const sess = await sessionQueries.getById(+req.params.id);
+      if (sess?.share_token) {
+        broadcastEvent(sess.share_token, {
+          type: 'session_log',
+          entry,
+          timestamp: new Date().toISOString(),
+        });
+      }
+    } catch { /* ignore */ }
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/session-log/:id', async (req, res) => {
+app.delete('/api/session-log/:id', authenticateToken, async (req, res) => {
   try { await sessionLogQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 // ─── PDF Annotations ──────────────────────────────────────────
-app.get('/api/pdf-annotations', async (req, res) => {
+app.get('/api/pdf-annotations', authenticateToken, async (req, res) => {
   try {
     const filename = req.query.filename;
     if (!filename) return res.status(400).json({ error: 'filename obrigatorio' });
@@ -809,19 +855,19 @@ app.get('/api/pdf-annotations', async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.post('/api/pdf-annotations', async (req, res) => {
+app.post('/api/pdf-annotations', authenticateToken, async (req, res) => {
   try {
-    const id = await annotationQueries.create(req.body);
+    const id = await annotationQueries.create(req.user.userId, req.body);
     res.status(201).json({ id, ...req.body, created_at: new Date().toISOString() });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.put('/api/pdf-annotations/:id', async (req, res) => {
+app.put('/api/pdf-annotations/:id', authenticateToken, async (req, res) => {
   try { await annotationQueries.update(+req.params.id, req.body); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
 
-app.delete('/api/pdf-annotations/:id', async (req, res) => {
+app.delete('/api/pdf-annotations/:id', authenticateToken, async (req, res) => {
   try { await annotationQueries.delete(+req.params.id); res.json({ success: true }); }
   catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -834,4 +880,5 @@ async function main() {
   await initDb();
   app.listen(PORT, () => console.log(`\n  Call of Cthulhu Sheet → http://localhost:${PORT}\n`));
 }
+
 main().catch(e => { console.error(e); process.exit(1); });

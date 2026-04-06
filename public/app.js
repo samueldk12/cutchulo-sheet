@@ -148,31 +148,215 @@ const state = {
   rollTarget: null,   // { name, value } para testes de habilidade/atributo
   gmMode: false,
   gmCharacters: [],
+  authToken: null,
+  sessionToken: null,  // for SSE events
+  eventSource: null,
 };
 
-// ─── API ──────────────────────────────────────────────────────
+// ─── API (with JWT auth) ──────────────────────────────────────
 const api = {
+  _headers() {
+    const h = { 'Content-Type': 'application/json' };
+    if (state.authToken) h['Authorization'] = `Bearer ${state.authToken}`;
+    return h;
+  },
   async get(url) {
-    const r = await fetch(url);
+    const r = await fetch(url, { headers: this._headers() });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   async post(url, body) {
-    const r = await fetch(url, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(url, { method: 'POST', headers: this._headers(), body: JSON.stringify(body) });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   async put(url, body) {
-    const r = await fetch(url, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const r = await fetch(url, { method: 'PUT', headers: this._headers(), body: JSON.stringify(body) });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
   async delete(url) {
-    const r = await fetch(url, { method: 'DELETE' });
+    const r = await fetch(url, { method: 'DELETE', headers: this._headers() });
     if (!r.ok) throw new Error(await r.text());
     return r.json();
   },
 };
+
+// ─── Auth ─────────────────────────────────────────────────────
+async function initAuth() {
+  const token = localStorage.getItem('token');
+  if (token) {
+    state.authToken = token;
+    try {
+      const data = await api.get('/api/auth/me');
+      if (data.user) {
+        hideLoginOverlay();
+        return;
+      }
+    } catch { /* token expired */ }
+    localStorage.removeItem('token');
+    state.authToken = null;
+  }
+  showLoginOverlay();
+}
+
+function showLoginOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'flex';
+}
+
+function hideLoginOverlay() {
+  const overlay = document.getElementById('login-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function showLoginMsg(msg, isError = true) {
+  const el = document.getElementById('login-msg');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.color = isError ? '#f87171' : '#34d399';
+}
+
+async function doLogin() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!username || !password) { showLoginMsg('Preencha os campos'); return; }
+  try {
+    const r = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) { showLoginMsg(data.error || 'Erro ao fazer login'); return; }
+    state.authToken = data.token;
+    localStorage.setItem('token', data.token);
+    hideLoginOverlay();
+    startApp();
+  } catch (e) { showLoginMsg('Erro de conexao'); }
+}
+
+async function doRegister() {
+  const username = document.getElementById('login-username').value.trim();
+  const password = document.getElementById('login-password').value;
+  if (!username || !password) { showLoginMsg('Preencha os campos'); return; }
+  try {
+    const r = await fetch('/api/auth/register', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username, password }),
+    });
+    const data = await r.json();
+    if (!r.ok) { showLoginMsg(data.error || 'Erro ao criar conta'); return; }
+    state.authToken = data.token;
+    localStorage.setItem('token', data.token);
+    showLoginMsg('Conta criada! Entrando...', false);
+    setTimeout(() => { hideLoginOverlay(); startApp(); }, 500);
+  } catch (e) { showLoginMsg('Erro de conexao'); }
+}
+
+// ─── SSE: Real-time session events ────────────────────────────
+function connectSSE() {
+  if (!state.authToken) return;
+  // Disconnect existing
+  if (state.eventSource) {
+    state.eventSource.close();
+    state.eventSource = null;
+  }
+  // We need a session token to subscribe. If we have one, connect.
+  if (!state.sessionToken) return;
+
+  const url = `/api/session/events?token=${encodeURIComponent(state.sessionToken)}`;
+  const es = new EventSource(url);
+  state.eventSource = es;
+  es.onopen = () => console.log('[sse] connected');
+
+  es.addEventListener('dice_roll', (e) => {
+    const data = JSON.parse(e.data);
+    showToast(`<b>🎲 ${data.player}</b> (${data.characterName}) rolou <b>${data.result.total}</b> — ${data.result.expression}`);
+  });
+
+  es.addEventListener('vital_change', (e) => {
+    const data = JSON.parse(e.data);
+    const v = data.vitals;
+    let msg = `<b>❤️ ${data.character.name || data.character.player}</b> vitais:`;
+    if (v.hp_current !== undefined) msg += ` HP: ${v.hp_current}/${v.hp_max}`;
+    if (v.mp_current !== undefined) msg += ` MP: ${v.mp_current}/${v.mp_max}`;
+    if (v.san_current !== undefined) msg += ` SAN: ${v.san_current}/${v.san_max}`;
+    showToast(msg);
+    // Update current character if same id
+    if (state.current?.id === data.character.id) {
+      if (v.hp_current !== undefined) { state.current.hp_current = v.hp_current; updateVitalDisplay('hp', v.hp_current, v.hp_max); }
+      if (v.hp_max !== undefined) { state.current.hp_max = v.hp_max; }
+      if (v.mp_current !== undefined) { state.current.mp_current = v.mp_current; updateVitalDisplay('mp', v.mp_current, v.mp_max); }
+      if (v.mp_max !== undefined) { state.current.mp_max = v.mp_max; }
+      if (v.san_current !== undefined) { state.current.san_current = v.san_current; updateVitalDisplay('san', v.san_current, v.san_max); }
+      if (v.san_max !== undefined) { state.current.san_max = v.san_max; }
+    }
+    // Update GM view if active
+    const gmChar = state.gmCharacters?.find(c => c.id === data.character.id);
+    if (gmChar) {
+      Object.assign(gmChar, v);
+      renderGmView();
+    }
+  });
+
+  es.addEventListener('player_joined', (e) => {
+    const data = JSON.parse(e.data);
+    showToast(`<b>👋 ${data.character.name}</b> (${data.character.player}) entrou na sessao!`);
+  });
+
+  es.addEventListener('session_activated', (e) => {
+    showToast('<b>🎭 Sessao ativada</b> pelo mestre.');
+  });
+
+  es.addEventListener('session_log', (e) => {
+    const data = JSON.parse(e.data);
+    showToast(`📝 ${data.entry.content}`);
+    // Reload GM log
+    if (state.gmMode && sessionState.active?.id === data.entry.session_id) {
+      loadGmSessionLog(data.entry.session_id);
+    }
+  });
+
+  es.addEventListener('error', () => {
+    console.warn('[sse] error, reconnecting in 5s...');
+    es.close();
+    state.eventSource = null;
+    setTimeout(connectSSE, 5000);
+  });
+}
+
+function showToast(html, duration = 5000) {
+  let container = document.querySelector('.toast-container');
+  if (!container) {
+    container = document.createElement('div');
+    container.className = 'toast-container';
+    document.body.appendChild(container);
+  }
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = html;
+  container.appendChild(toast);
+  setTimeout(() => {
+    toast.classList.add('toast-exit');
+    setTimeout(() => toast.remove(), 300);
+  }, duration);
+}
+
+// Setup login overlay event listeners
+function setupLoginOverlay() {
+  const loginBtn = document.getElementById('btn-do-login');
+  const regBtn = document.getElementById('btn-do-register');
+  const pwInput = document.getElementById('login-password');
+  const userInput = document.getElementById('login-username');
+  if (loginBtn) loginBtn.addEventListener('click', doLogin);
+  if (regBtn) regBtn.addEventListener('click', doRegister);
+  const onEnter = (e) => { if (e.key === 'Enter') doLogin(); };
+  if (pwInput) pwInput.addEventListener('keydown', onEnter);
+  if (userInput) userInput.addEventListener('keydown', onEnter);
+}
 
 // ─── Utilidades ───────────────────────────────────────────────
 const $ = (sel, ctx = document) => ctx.querySelector(sel);
@@ -791,17 +975,23 @@ function setupEventListeners() {
       const parsed = JSON.parse(text);
       const charData = parsed.character || parsed; // accept both formats
       if (!charData.name) { alert('JSON inválido: campo "name" não encontrado'); return; }
-      const imported = await api.post('/api/import', { character: charData });
-      const existingIdx = state.characters.findIndex(c => c.id === imported.id);
-      const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
-      if (existingIdx >= 0) {
-        state.characters[existingIdx] = entry;
+      const isFriend = !!parsed.isFriendExport;
+      const imported = await api.post('/api/import', { character: charData, isFriendExport: isFriend });
+      if (isFriend) {
+        await loadFriendCharacters();
+        alert(`"${imported.name}" adicionado como amigo!`);
       } else {
-        state.characters.unshift(entry);
+        const existingIdx = state.characters.findIndex(c => c.id === imported.id);
+        const entry = { id: imported.id, name: imported.name, player: imported.player, occupation: imported.occupation, age: imported.age };
+        if (existingIdx >= 0) {
+          state.characters[existingIdx] = entry;
+        } else {
+          state.characters.unshift(entry);
+        }
+        renderCharacterList();
+        await selectCharacter(imported.id);
+        alert(`"${imported.name}" ${imported.wasUpdated ? 'atualizado' : 'importado'} com sucesso!`);
       }
-      renderCharacterList();
-      await selectCharacter(imported.id);
-      alert(`"${imported.name}" ${imported.wasUpdated ? 'atualizado' : 'importado'} com sucesso!`);
     } catch (e) { alert('Erro ao importar: ' + e.message); }
     e.target.value = '';
   });
@@ -2061,7 +2251,7 @@ function setupFriends() {
 
 async function loadFriendCharacters() {
   try {
-    const chars = await api.get('/api/gm');
+    const chars = await api.get('/api/friends');
     renderFriendCharacters(chars);
   } catch (e) { console.error(e); }
 }
@@ -2236,6 +2426,11 @@ function enterSession(sess) {
   sessionState.active = sess;
   updateSessionStatusChip(sess);
   updateGmSessionPanel(sess);
+  // Connect SSE when session has a share token
+  if (sess.share_token) {
+    state.sessionToken = sess.share_token;
+    connectSSE();
+  }
   if (sess.role === 'master') {
     enterGmMode();
     loadGmSessionLog(sess.id);
@@ -2684,16 +2879,17 @@ function setupShareLink() {
   $('#btn-share-link')?.addEventListener('click', openShareModal);
   $('#share-modal-close')?.addEventListener('click', () => $('#share-modal').classList.remove('open'));
   $('#btn-copy-share-link')?.addEventListener('click', copyShareLink);
+  $('#btn-copy-share-code')?.addEventListener('click', copyShareCode);
   $$('input[name="share-type"]').forEach(r => r.addEventListener('change', updateShareLink));
 }
 
-function openShareModal() {
+async function openShareModal() {
   if (!state.current) return;
-  updateShareLink();
+  await updateShareLink();
   $('#share-modal').classList.add('open');
 }
 
-function updateShareLink() {
+async function updateShareLink() {
   if (!state.current) return;
   const type = document.querySelector('input[name="share-type"]:checked')?.value || 'full';
   const c = { ...state.current };
@@ -2708,17 +2904,61 @@ function updateShareLink() {
     payload.evidence = evidenceState.items.map(({ id, ...ev }) => ev);
   }
   try {
-    const encoded = btoa(unescape(encodeURIComponent(JSON.stringify(payload))));
-    const url = `${location.origin}${location.pathname}?share=${encoded}`;
+    const share = await api.post('/api/shares', payload);
+    const shareId = share.id;
+    const url = `${location.origin}${location.pathname}?shareId=${encodeURIComponent(shareId)}`;
     const input = $('#share-link-input');
     if (input) input.value = url;
+    renderShareQr(url, shareId);
     $('#share-copied').style.display = 'none';
     // Update share desc with evidence count
     const descEl = $('.share-desc');
     if (descEl && type === 'full' && evidenceState.items.length > 0) {
       descEl.innerHTML = `Copie o link abaixo para compartilhar. Quem receber pode clicar em <strong>🔗 Importar via Link</strong> na barra lateral para importar de forma rápida. <em>(inclui ${evidenceState.items.length} evidência(s))</em>`;
     }
-  } catch (e) { console.error('Erro ao gerar link:', e); }
+    if (descEl && !(type === 'full' && evidenceState.items.length > 0)) {
+      descEl.innerHTML = 'Copie o link abaixo para compartilhar. Quem receber pode clicar em <strong>Importar via Link</strong> na barra lateral para importar de forma rapida.';
+    }
+  } catch (e) {
+    console.error('Erro ao gerar link:', e);
+    const container = $('#share-qr-placeholder');
+    if (container) {
+      container.classList.remove('has-qr');
+      container.textContent = 'Nao foi possivel gerar o link curto para o QR Code.';
+    }
+  }
+}
+
+function renderShareQr(url, shareId) {
+  const container = $('#share-qr-placeholder');
+  if (!container) return;
+
+  container.innerHTML = '';
+  container.classList.add('has-qr');
+
+  if (typeof QRCode !== 'function') {
+    container.classList.remove('has-qr');
+    container.textContent = 'Nao foi possivel carregar o gerador de QR Code. Use o link ou copie o codigo.';
+    return;
+  }
+
+  const qrWrap = document.createElement('div');
+  qrWrap.className = 'share-qr-canvas-wrap';
+  container.appendChild(qrWrap);
+
+  new QRCode(qrWrap, {
+    text: url,
+    width: 220,
+    height: 220,
+    colorDark: '#111111',
+    colorLight: '#ffffff',
+    correctLevel: QRCode.CorrectLevel.M,
+  });
+
+  const note = document.createElement('div');
+  note.className = 'share-qr-note';
+  note.textContent = `O QR aponta para um link curto de compartilhamento. Codigo: ${shareId}.`;
+  container.appendChild(note);
 }
 
 async function copyShareLink() {
@@ -2730,16 +2970,55 @@ async function copyShareLink() {
     input.select(); document.execCommand('copy');
   }
   const copied = $('#share-copied');
-  if (copied) { copied.style.display = 'block'; setTimeout(() => copied.style.display = 'none', 3000); }
+  if (copied) {
+    copied.textContent = 'Link copiado!';
+    copied.style.display = 'block';
+    setTimeout(() => copied.style.display = 'none', 3000);
+  }
+}
+
+async function copyShareCode() {
+  const input = $('#share-link-input');
+  if (!input?.value) return;
+
+  let code = input.value;
+  try {
+    const url = new URL(input.value);
+    code = url.searchParams.get('shareId') || url.searchParams.get('share') || input.value;
+  } catch {}
+
+  try {
+    await navigator.clipboard.writeText(code);
+  } catch {
+    const helper = document.createElement('textarea');
+    helper.value = code;
+    helper.style.position = 'fixed';
+    helper.style.opacity = '0';
+    document.body.appendChild(helper);
+    helper.select();
+    document.execCommand('copy');
+    helper.remove();
+  }
+
+  const copied = $('#share-copied');
+  if (copied) {
+    copied.textContent = 'Codigo copiado!';
+    copied.style.display = 'block';
+    setTimeout(() => {
+      copied.textContent = 'Link copiado!';
+      copied.style.display = 'none';
+    }, 3000);
+  }
 }
 
 async function checkShareParam() {
   const params = new URLSearchParams(location.search);
+  const shareId = params.get('shareId');
   const shareData = params.get('share');
-  if (!shareData) return;
+  if (!shareId && !shareData) return;
   history.replaceState({}, '', location.pathname);
   try {
-    const parsed = _decodeShareData(shareData);
+    const parsed = await _resolveShareData(shareId || shareData);
     if (!parsed) return;
     const charData = parsed.character || parsed;
     if (!charData.name) return;
@@ -2781,6 +3060,27 @@ function _decodeShareData(raw) {
     }
     return JSON.parse(decodeURIComponent(escape(atob(raw))));
   } catch { return null; }
+}
+
+async function _resolveShareData(raw) {
+  try {
+    if (!raw) return null;
+    if (!String(raw).includes('http') && !String(raw).includes('?') && /^[a-z0-9-]{20,}$/i.test(String(raw))) {
+      return await api.get(`/api/shares/${encodeURIComponent(raw)}`);
+    }
+    if (String(raw).startsWith('http') || String(raw).includes('?')) {
+      try {
+        const url = new URL(String(raw).startsWith('http') ? raw : `${location.origin}${location.pathname}${String(raw).startsWith('?') ? raw : `?${raw}`}`);
+        const shareId = url.searchParams.get('shareId');
+        if (shareId) return await api.get(`/api/shares/${encodeURIComponent(shareId)}`);
+        const shareCode = url.searchParams.get('share');
+        if (shareCode) return _decodeShareData(shareCode);
+      } catch {}
+    }
+    return _decodeShareData(raw);
+  } catch {
+    return null;
+  }
 }
 
 function setupImportLinkModal() {
@@ -3192,6 +3492,11 @@ function renderFriendCharacters(chars) {
 // ══════════════════════════════════════════════════════════════
 
 async function init() {
+  await initAuth();
+}
+
+// Called after successful authentication
+async function startApp() {
   await Promise.all([loadCharacters(), loadConfig()]);
   setupEventListeners();
   setupDiceRoller();
@@ -3212,6 +3517,8 @@ async function init() {
   setupGmEnhancements();
   setupImportLinkModal();
   setupPdfSearch();
+  // Login/overlay
+  setupLoginOverlay();
   // Load catalog for weapon autocomplete
   try {
     catalogState.list = await api.get('/api/weapon-catalog');
@@ -3220,17 +3527,22 @@ async function init() {
   // Restore active session or show startup overlay
   try {
     const active = await api.get('/api/sessions/active');
-    if (active) {
+    if (active && !active.error) {
       sessionState.active = active;
       updateSessionStatusChip(active);
       updateGmSessionPanel(active);
-      // Pre-load session log so it's ready when GM view is opened
+      // Set SSE session token
+      if (active.share_token) {
+        state.sessionToken = active.share_token;
+        connectSSE();
+      }
       if (active.role === 'master') loadGmSessionLog(active.id);
     } else {
-      // No active session — show startup overlay after short delay
       setTimeout(() => openSessionStartup(), 600);
     }
-  } catch (e) {}
+  } catch (e) {
+    setTimeout(() => openSessionStartup(), 600);
+  }
   // Populate weapon presets datalist (built-in)
   const dl = $('#weapon-presets');
   if (dl) WEAPON_PRESETS.forEach(w => { const o = document.createElement('option'); o.value = w.name; dl.appendChild(o); });
