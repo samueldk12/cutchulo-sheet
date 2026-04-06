@@ -3492,6 +3492,7 @@ function renderFriendCharacters(chars) {
 // ══════════════════════════════════════════════════════════════
 
 async function init() {
+  setupLoginOverlay();
   await initAuth();
 }
 
@@ -3517,8 +3518,6 @@ async function startApp() {
   setupGmEnhancements();
   setupImportLinkModal();
   setupPdfSearch();
-  // Login/overlay
-  setupLoginOverlay();
   // Load catalog for weapon autocomplete
   try {
     catalogState.list = await api.get('/api/weapon-catalog');
