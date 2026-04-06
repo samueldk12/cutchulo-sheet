@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Entrar na Sessao - Call of Cthulhu</title>
+  <link rel="stylesheet" href="/style.css">
+  <style>
+    .join-container { max-width: 480px; margin: 60px auto; padding: 24px; background: #1c1c2a; border-radius: 12px; }
+    .join-container h1 { color: #e0d8f0; margin-top: 0; text-align: center; }
+    .join-container p { color: #a9a3b8; }
+    .join-container input, .join-container button { width: 100%; padding: 10px; margin: 6px 0; border-radius: 6px; border: 1px solid #3a3550; background: #15151f; color: #e0d8f0; box-sizing: border-box; }
+    .join-container button { background: #7b61ff; border: none; cursor: pointer; font-weight: bold; }
+    .join-container button:hover { background: #6447e0; }
+    .status-msg { text-align: center; padding: 8px; border-radius: 6px; margin: 8px 0; }
+    .status-msg.error { background: #3a1520; color: #f87171; }
+    .status-msg.ok { background: #153a20; color: #34d399; }
+    .player-list { list-style: none; padding: 0; margin: 16px 0; }
+    .player-list li { padding: 8px 12px; background: #2a2a3d; border-radius: 6px; margin: 4px 0; color: #d0c8e0; display: flex; justify-content: space-between; }
+    .player-list li .role-badge { font-size: 12px; background: #7b61ff33; color: #b8a8ff; padding: 2px 8px; border-radius: 4px; }
+    #login-section { display: block; }
+    #session-section { display: none; }
+  </style>
+</head>
+<body>
+  <div class="join-container">
+    <h1>Entrar na_sessao</h1>
+    <div id="login-section">
+      <p>Fac login ou crie sua conta para entrar na sessao.</p>
+      <input id="username" placeholder="Username" />
+      <input id="password" type="password" placeholder="Senha" />
+      <button id="btn-login" onclick="doLogin()">Entrar</button>
+      <button id="btn-register" onclick="doRegister()" style="background:#3a3550">Criar conta</button>
+      <div id="login-msg"></div>
+    </div>
+    <div id="session-section">
+      <p id="session-name"></p>
+      <h3>Jogadores na sessao</h3>
+      <ul id="player-list" class="player-list"></ul>
+      <hr style="border-color:#3a3550;margin:16px 0">
+      <h3>Seu personagem</h3>
+      <input id="char-name" placeholder="Nome do investigador" />
+      <input id="char-player" placeholder="Nome do jogador" />
+      <input id="char-occupation" placeholder="Ocupacao" />
+      <button id="btn-join" onclick="joinSession()">Entrar na Sessao</button>
+      <div id="join-msg"></div>
+      <a id="link-app" href="/" style="display:none;color:#7b61ff;text-align:center;margin-top:12px;display:block">Ir para ficha →</a>
+    </div>
+  </div>
+
+  <script>
+    const TOKEN = window.location.pathname.split('/').pop();
+    const API = '';
+    let authToken = localStorage.getItem('token');
+
+    async function doLogin() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('login-msg');
+      msg.className = '';
+      try {
+        const res = await fetch(`${API}/api/auth/login`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { msg.textContent = data.error; msg.className = 'status-msg error'; return; }
+        localStorage.setItem('token', data.token);
+        authToken = data.token;
+        loadSession();
+      } catch (e) { msg.textContent = 'Erro de conexao'; msg.className = 'status-msg error'; }
+    }
+
+    async function doRegister() {
+      const username = document.getElementById('username').value.trim();
+      const password = document.getElementById('password').value;
+      const msg = document.getElementById('login-msg');
+      msg.className = '';
+      if (!username || !password) { msg.textContent = 'Preencha os campos'; msg.className = 'status-msg error'; return; }
+      try {
+        const res = await fetch(`${API}/api/auth/register`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ username, password })
+        });
+        const data = await res.json();
+        if (!res.ok) { msg.textContent = data.error; msg.className = 'status-msg error'; return; }
+        localStorage.setItem('token', data.token);
+        authToken = data.token;
+        msg.textContent = 'Conta criada! Entrando...';
+        msg.className = 'status-msg ok';
+        loadSession();
+      } catch (e) { msg.textContent = 'Erro de conexao'; msg.className = 'status-msg error'; }
+    }
+
+    async function loadSession() {
+      try {
+        const res = await fetch(`${API}/api/session/join/${TOKEN}`, {
+          headers: authToken ? { 'Authorization': `Bearer ${authToken}` } : {}
+        });
+        if (!res.ok) { const d = await res.json(); document.body.innerHTML = `<div class="join-container"><h1>Sessao nao encontrada</h1><p>${d.error || 'O link e invalido ou expirou.'}</p></div>`; return; }
+        const data = await res.json();
+        document.getElementById('login-section').style.display = 'none';
+        document.getElementById('session-section').style.display = 'block';
+        document.getElementById('session-name').textContent = `Sessao: ${data.session.name}`;
+        if (data.session.notes) document.getElementById('session-name').textContent += ` — ${data.session.notes}`;
+        const list = document.getElementById('player-list');
+        list.innerHTML = '';
+        const players = data.characters || [];
+        if (players.length === 0) { list.innerHTML = '<li style="color:#666">Nenhum jogador ainda</li>'; }
+        for (const p of players) {
+          list.innerHTML += `<li><span>${p.name}</span><span class="role-badge">${p.player || 'Anonimo'}</span></li>`;
+        }
+      } catch (e) { document.body.innerHTML = `<div class="join-container"><h1>Erro</h1><p>Erro ao carregar sessao.</p></div>`; }
+    }
+
+    async function joinSession() {
+      const name = document.getElementById('char-name').value.trim() || 'Investigador';
+      const player = document.getElementById('char-player').value.trim();
+      const occupation = document.getElementById('char-occupation').value.trim();
+      const msg = document.getElementById('join-msg');
+      msg.className = '';
+      try {
+        const res = await fetch(`${API}/api/session/join/${TOKEN}/character`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json', ...(authToken ? { 'Authorization': `Bearer ${authToken}` } : {}) },
+          body: JSON.stringify({ name, player, occupation })
+        });
+        const data = await res.json();
+        if (!res.ok) { msg.textContent = data.error; msg.className = 'status-msg error'; return; }
+        // Save token for the app
+        if (authToken) localStorage.setItem('token', authToken);
+        msg.textContent = `"${data.name}" entrou na sessao!`;
+        msg.className = 'status-msg ok';
+        const link = document.getElementById('link-app');
+        link.style.display = 'block';
+      } catch (e) { msg.textContent = 'Erro de conexao'; msg.className = 'status-msg error'; }
+    }
+
+    // Auto-load if already logged in
+    if (authToken) loadSession();
+  </script>
+</body>
+</html>

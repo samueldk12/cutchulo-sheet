@@ -1,36 +1,42 @@
-const initSqlJs = require('sql.js');
-const path = require('path');
 const fs = require('fs');
+const path = require('path');
 const { randomUUID } = require('crypto');
+const bcrypt = require('bcryptjs');
 
-const DB_DIR  = path.join(__dirname, 'data');
-const DB_PATH = path.join(DB_DIR, 'cthulhu.db');
-let db = null;
+// ─── Database backend selection ──────────────────────────────
+const POSTGRES_URL = process.env.DATABASE_URL
+  || process.env.POSTGRES_URL
+  || null;
+const USE_PG = !!POSTGRES_URL;
 
-async function initDb() {
-  // Ensure data directory exists
-  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+let DB = null;  // pg.Pool or sql.js instance
+let isPg = USE_PG;
 
-  const SQL = await initSqlJs();
-  const isValidFile = fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).isFile();
-  db = isValidFile
-    ? new SQL.Database(fs.readFileSync(DB_PATH))
-    : new SQL.Database();
-  db.run('PRAGMA foreign_keys = ON');
-  initSchema();
-  saveDb();
+// ─── Postgres ────────────────────────────────────────────────
+if (USE_PG) {
+  const { Pool } = require('pg');
+  DB = new Pool({
+    connectionString: POSTGRES_URL,
+    ssl: process.env.PGSSL === 'false' ? false
+      : process.env.PGSSL === 'require' ? { rejectUnauthorized: false }
+      : { rejectUnauthorized: false },
+    max: 10,
+    idleTimeoutMillis: 30000,
+  });
 }
 
-function saveDb() {
-  const data = db.export();
+// ─── SQLite helpers ──────────────────────────────────────────
+function sqliteSave() {
+  if (!DB) return;
+  const data = DB.export();
+  const DB_DIR  = path.join(__dirname, 'data');
+  const DB_PATH = path.join(DB_DIR, 'cthulhu.db');
+  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
   fs.writeFileSync(DB_PATH, Buffer.from(data));
 }
 
-function getDb() { return db; }
-
-// ─── Query Helpers ───────────────────────────────────────────
-function query(sql, params = []) {
-  const stmt = db.prepare(sql);
+function sqliteQuery(sql, params = []) {
+  const stmt = DB.prepare(sql);
   stmt.bind(params);
   const rows = [];
   while (stmt.step()) rows.push(stmt.getAsObject());
@@ -38,18 +44,42 @@ function query(sql, params = []) {
   return rows;
 }
 
-function queryOne(sql, params = []) {
-  return query(sql, params)[0] ?? null;
+function sqliteOne(sql, params = []) { return sqliteQuery(sql, params)[0] ?? null; }
+function sqliteAll(sql, params = []) { return sqliteQuery(sql, params); }
+function sqliteRun(sql, params = []) { DB.run(sql, params); sqliteSave(); }
+function sqliteInsert(sql, params = []) { sqliteRun(sql, params); return sqliteQuery('SELECT last_insert_rowid() as id')[0]?.id; }
+
+async function pgOne(sql, params = []) {
+  const res = await DB.query(sql, params);
+  return res.rows[0] || null;
+}
+async function pgAll(sql, params = []) {
+  const res = await DB.query(sql, params);
+  return res.rows;
+}
+async function pgRun(sql, params = []) { await DB.query(sql, params); }
+async function pgInsert(sql, params = []) {
+  const res = await DB.query(sql + ' RETURNING id', params);
+  return res.rows[0].id;
 }
 
-function run(sql, params = []) {
-  db.run(sql, params);
-  saveDb();
+// Unified helpers
+async function run(sql, params = []) {
+  return isPg ? pgRun(sql, params) : sqliteRun(sql, params);
 }
-
-function lastInsertId() {
-  return db.exec('SELECT last_insert_rowid()')[0]?.values[0][0] ?? null;
+async function queryOne(sql, params = []) {
+  return isPg ? pgOne(sql, params) : sqliteOne(sql, params);
 }
+async function queryAll(sql, params = []) {
+  return isPg ? pgAll(sql, params) : sqliteAll(sql, params);
+}
+async function insertRow(sql, params = []) {
+  return isPg ? pgInsert(sql, params) : sqliteInsert(sql, params);
+}
+function dbRaw(sql, params = []) {
+  DB.run(sql, params);
+}
+function getDb() { return DB; }
 
 // ─── Schema ──────────────────────────────────────────────────
 const DEFAULT_CONFIG = {
@@ -65,217 +95,246 @@ const DEFAULT_CONFIG = {
   auto_calc:          'true',
 };
 
-function initSchema() {
-  db.exec(`
-    CREATE TABLE IF NOT EXISTS weapon_catalog (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL DEFAULT '',
-      skill TEXT DEFAULT '',
-      damage TEXT DEFAULT '',
-      range TEXT DEFAULT '',
-      attacks_per_round TEXT DEFAULT '1',
-      ammo INTEGER DEFAULT 0,
-      malfunction INTEGER DEFAULT 100,
-      category TEXT DEFAULT 'other',
-      notes TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
+const PG_TABLES = `
+CREATE TABLE IF NOT EXISTS users (
+  id SERIAL PRIMARY KEY,
+  username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL,
+  is_master BOOLEAN DEFAULT false,
+  display_name TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS weapon_catalog (
+  id SERIAL PRIMARY KEY, name TEXT NOT NULL DEFAULT '', skill TEXT DEFAULT '',
+  damage TEXT DEFAULT '', range TEXT DEFAULT '', attacks_per_round TEXT DEFAULT '1',
+  ammo INTEGER DEFAULT 0, malfunction INTEGER DEFAULT 100, category TEXT DEFAULT 'other',
+  notes TEXT DEFAULT '', created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id SERIAL PRIMARY KEY, name TEXT NOT NULL DEFAULT 'Nova Sessao', role TEXT DEFAULT 'player',
+  character_id INTEGER, notes TEXT DEFAULT '', is_active BOOLEAN DEFAULT false,
+  share_token TEXT UNIQUE DEFAULT NULL, created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS session_log_entries (
+  id SERIAL PRIMARY KEY, session_id INTEGER NOT NULL, content TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS pdf_annotations (
+  id SERIAL PRIMARY KEY, filename TEXT NOT NULL, page INTEGER DEFAULT 1,
+  note TEXT DEFAULT '', color TEXT DEFAULT 'yellow', created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS characters (
+  id SERIAL PRIMARY KEY, uuid TEXT DEFAULT '', name TEXT NOT NULL DEFAULT 'Novo Investigador',
+  player TEXT DEFAULT '', occupation TEXT DEFAULT '', age INTEGER DEFAULT 25,
+  gender TEXT DEFAULT '', residence TEXT DEFAULT '', birthplace TEXT DEFAULT '',
+  str INTEGER DEFAULT 50, dex INTEGER DEFAULT 50, int_val INTEGER DEFAULT 50,
+  con INTEGER DEFAULT 50, app INTEGER DEFAULT 50, pow INTEGER DEFAULT 50,
+  siz INTEGER DEFAULT 50, edu INTEGER DEFAULT 50, luck INTEGER DEFAULT 50,
+  hp_current INTEGER DEFAULT 10, hp_max INTEGER DEFAULT 10,
+  mp_current INTEGER DEFAULT 10, mp_max INTEGER DEFAULT 10,
+  san_current INTEGER DEFAULT 50, san_max INTEGER DEFAULT 50,
+  temporary_insanity INTEGER DEFAULT 0, indefinite_insanity INTEGER DEFAULT 0,
+  cash TEXT DEFAULT '', assets TEXT DEFAULT '', spending_level TEXT DEFAULT '',
+  appearance_desc TEXT DEFAULT '', ideology TEXT DEFAULT '', significant_people TEXT DEFAULT '',
+  meaningful_locations TEXT DEFAULT '', treasured_possessions TEXT DEFAULT '',
+  traits TEXT DEFAULT '', injuries_scars TEXT DEFAULT '', phobias_manias TEXT DEFAULT '',
+  arcane_tomes TEXT DEFAULT '', backstory TEXT DEFAULT '', notes TEXT DEFAULT '',
+  image TEXT DEFAULT '', is_friend BOOLEAN DEFAULT false, session_token TEXT DEFAULT NULL,
+  created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS skills (
+  id SERIAL PRIMARY KEY, character_id INTEGER NOT NULL, name TEXT NOT NULL,
+  base_value INTEGER DEFAULT 0, value INTEGER DEFAULT 0,
+  is_occupation BOOLEAN DEFAULT false, is_interest BOOLEAN DEFAULT false,
+  occ_points INTEGER DEFAULT 0, int_points INTEGER DEFAULT 0, game_points INTEGER DEFAULT 0,
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS weapons (
+  id SERIAL PRIMARY KEY, character_id INTEGER NOT NULL, name TEXT DEFAULT '',
+  skill TEXT DEFAULT '', damage TEXT DEFAULT '', range TEXT DEFAULT '',
+  attacks_per_round TEXT DEFAULT '1', ammo INTEGER DEFAULT 0, malfunction INTEGER DEFAULT 100,
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS possessions (
+  id SERIAL PRIMARY KEY, character_id INTEGER NOT NULL, item TEXT DEFAULT '',
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS dice_history (
+  id SERIAL PRIMARY KEY, character_id INTEGER, expression TEXT NOT NULL,
+  result INTEGER NOT NULL, details TEXT DEFAULT '', rolled_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evidence (
+  id SERIAL PRIMARY KEY, title TEXT NOT NULL DEFAULT 'Nova Evidencia',
+  description TEXT DEFAULT '', session_tag TEXT DEFAULT '', image TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW()
+);
+CREATE TABLE IF NOT EXISTS npcs (
+  id SERIAL PRIMARY KEY, name TEXT NOT NULL DEFAULT 'Novo NPC', type TEXT DEFAULT 'npc',
+  description TEXT DEFAULT '', str INTEGER DEFAULT 50, dex INTEGER DEFAULT 50,
+  int_val INTEGER DEFAULT 50, con INTEGER DEFAULT 50, pow INTEGER DEFAULT 50,
+  siz INTEGER DEFAULT 50, hp_current INTEGER DEFAULT 10, hp_max INTEGER DEFAULT 10,
+  mp_current INTEGER DEFAULT 10, mp_max INTEGER DEFAULT 10,
+  san_current INTEGER DEFAULT 50, san_max INTEGER DEFAULT 50,
+  damage_bonus TEXT DEFAULT '', build TEXT DEFAULT '', armor INTEGER DEFAULT 0,
+  attacks TEXT DEFAULT '[]', skills_text TEXT DEFAULT '',
+  special_abilities TEXT DEFAULT '', notes TEXT DEFAULT '', image TEXT DEFAULT '',
+  created_at TIMESTAMP DEFAULT NOW(), updated_at TIMESTAMP DEFAULT NOW()
+);
+`;
 
-    CREATE TABLE IF NOT EXISTS sessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL DEFAULT 'Nova Sessão',
-      role TEXT DEFAULT 'player',
-      character_id INTEGER,
-      notes TEXT DEFAULT '',
-      is_active INTEGER DEFAULT 0,
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
+const SQLITE_TABLES = `
+CREATE TABLE IF NOT EXISTS users (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT UNIQUE NOT NULL,
+  password_hash TEXT NOT NULL, is_master INTEGER DEFAULT 0,
+  display_name TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS weapon_catalog (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT '',
+  skill TEXT DEFAULT '', damage TEXT DEFAULT '', range TEXT DEFAULT '',
+  attacks_per_round TEXT DEFAULT '1', ammo INTEGER DEFAULT 0, malfunction INTEGER DEFAULT 100,
+  category TEXT DEFAULT 'other', notes TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS sessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT 'Nova Sessao',
+  role TEXT DEFAULT 'player', character_id INTEGER, notes TEXT DEFAULT '',
+  is_active INTEGER DEFAULT 0, share_token TEXT UNIQUE DEFAULT NULL,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS session_log_entries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, session_id INTEGER NOT NULL,
+  content TEXT DEFAULT '', created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS pdf_annotations (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, filename TEXT NOT NULL, page INTEGER DEFAULT 1,
+  note TEXT DEFAULT '', color TEXT DEFAULT 'yellow',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS characters (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, uuid TEXT DEFAULT '',
+  name TEXT NOT NULL DEFAULT 'Novo Investigador', player TEXT DEFAULT '',
+  occupation TEXT DEFAULT '', age INTEGER DEFAULT 25, gender TEXT DEFAULT '',
+  residence TEXT DEFAULT '', birthplace TEXT DEFAULT '',
+  str INTEGER DEFAULT 50, dex INTEGER DEFAULT 50, int_val INTEGER DEFAULT 50,
+  con INTEGER DEFAULT 50, app INTEGER DEFAULT 50, pow INTEGER DEFAULT 50,
+  siz INTEGER DEFAULT 50, edu INTEGER DEFAULT 50, luck INTEGER DEFAULT 50,
+  hp_current INTEGER DEFAULT 10, hp_max INTEGER DEFAULT 10,
+  mp_current INTEGER DEFAULT 10, mp_max INTEGER DEFAULT 10,
+  san_current INTEGER DEFAULT 50, san_max INTEGER DEFAULT 50,
+  temporary_insanity INTEGER DEFAULT 0, indefinite_insanity INTEGER DEFAULT 0,
+  cash TEXT DEFAULT '', assets TEXT DEFAULT '', spending_level TEXT DEFAULT '',
+  appearance_desc TEXT DEFAULT '', ideology TEXT DEFAULT '', significant_people TEXT DEFAULT '',
+  meaningful_locations TEXT DEFAULT '', treasured_possessions TEXT DEFAULT '',
+  traits TEXT DEFAULT '', injuries_scars TEXT DEFAULT '', phobias_manias TEXT DEFAULT '',
+  arcane_tomes TEXT DEFAULT '', backstory TEXT DEFAULT '', notes TEXT DEFAULT '',
+  image TEXT DEFAULT '', is_friend INTEGER DEFAULT 0, session_token TEXT DEFAULT NULL,
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS skills (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, character_id INTEGER NOT NULL, name TEXT NOT NULL,
+  base_value INTEGER DEFAULT 0, value INTEGER DEFAULT 0,
+  is_occupation INTEGER DEFAULT 0, is_interest INTEGER DEFAULT 0,
+  occ_points INTEGER DEFAULT 0, int_points INTEGER DEFAULT 0, game_points INTEGER DEFAULT 0,
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS weapons (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, character_id INTEGER NOT NULL,
+  name TEXT DEFAULT '', skill TEXT DEFAULT '', damage TEXT DEFAULT '', range TEXT DEFAULT '',
+  attacks_per_round TEXT DEFAULT '1', ammo INTEGER DEFAULT 0, malfunction INTEGER DEFAULT 100,
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS possessions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, character_id INTEGER NOT NULL, item TEXT DEFAULT '',
+  FOREIGN KEY(character_id) REFERENCES characters(id)
+);
+CREATE TABLE IF NOT EXISTS dice_history (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, character_id INTEGER, expression TEXT NOT NULL,
+  result INTEGER NOT NULL, details TEXT DEFAULT '',
+  rolled_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS evidence (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL DEFAULT 'Nova Evidencia',
+  description TEXT DEFAULT '', session_tag TEXT DEFAULT '', image TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now'))
+);
+CREATE TABLE IF NOT EXISTS npcs (
+  id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL DEFAULT 'Novo NPC',
+  type TEXT DEFAULT 'npc', description TEXT DEFAULT '',
+  str INTEGER DEFAULT 50, dex INTEGER DEFAULT 50, int_val INTEGER DEFAULT 50,
+  con INTEGER DEFAULT 50, pow INTEGER DEFAULT 50, siz INTEGER DEFAULT 50,
+  hp_current INTEGER DEFAULT 10, hp_max INTEGER DEFAULT 10,
+  mp_current INTEGER DEFAULT 10, mp_max INTEGER DEFAULT 10,
+  san_current INTEGER DEFAULT 50, san_max INTEGER DEFAULT 50,
+  damage_bonus TEXT DEFAULT '', build TEXT DEFAULT '', armor INTEGER DEFAULT 0,
+  attacks TEXT DEFAULT '[]', skills_text TEXT DEFAULT '',
+  special_abilities TEXT DEFAULT '', notes TEXT DEFAULT '', image TEXT DEFAULT '',
+  created_at TEXT DEFAULT (datetime('now')), updated_at TEXT DEFAULT (datetime('now'))
+);
+`;
 
-    CREATE TABLE IF NOT EXISTS session_log_entries (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      session_id INTEGER NOT NULL,
-      content TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
+async function initDb() {
+  if (isPg) {
+    try {
+      await DB.query('SELECT 1');
+      await DB.query(PG_TABLES);
+      for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
+        await DB.query(
+          'INSERT INTO config (key, value) VALUES ($1, $2) ON CONFLICT (key) DO NOTHING',
+          [key, value]
+        );
+      }
+      console.log('[db] PostgreSQL connected');
+      return;
+    } catch (e) {
+      console.error('[db] PostgreSQL failed, falling back to SQLite:', e.message);
+      isPg = false;
+      DB = null;
+    }
+  }
+  // SQLite
+  const initSqlJs = require('sql.js');
+  const s = await initSqlJs();
+  const DB_DIR = path.join(__dirname, 'data');
+  const DB_PATH = path.join(DB_DIR, 'cthulhu.db');
+  if (!fs.existsSync(DB_DIR)) fs.mkdirSync(DB_DIR, { recursive: true });
+  const exists = fs.existsSync(DB_PATH) && fs.statSync(DB_PATH).isFile();
+  DB = exists ? new s.Database(fs.readFileSync(DB_PATH)) : new s.Database();
+  DB.run('PRAGMA foreign_keys = ON');
+  DB.run(SQLITE_TABLES);
 
-    CREATE TABLE IF NOT EXISTS pdf_annotations (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      filename TEXT NOT NULL,
-      page INTEGER DEFAULT 1,
-      note TEXT DEFAULT '',
-      color TEXT DEFAULT 'yellow',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS characters (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      uuid TEXT DEFAULT '',
-      name TEXT NOT NULL DEFAULT 'Novo Investigador',
-      player TEXT DEFAULT '',
-      occupation TEXT DEFAULT '',
-      age INTEGER DEFAULT 25,
-      gender TEXT DEFAULT '',
-      residence TEXT DEFAULT '',
-      birthplace TEXT DEFAULT '',
-      str INTEGER DEFAULT 50,
-      dex INTEGER DEFAULT 50,
-      int_val INTEGER DEFAULT 50,
-      con INTEGER DEFAULT 50,
-      app INTEGER DEFAULT 50,
-      pow INTEGER DEFAULT 50,
-      siz INTEGER DEFAULT 50,
-      edu INTEGER DEFAULT 50,
-      luck INTEGER DEFAULT 50,
-      hp_current INTEGER DEFAULT 10,
-      hp_max INTEGER DEFAULT 10,
-      mp_current INTEGER DEFAULT 10,
-      mp_max INTEGER DEFAULT 10,
-      san_current INTEGER DEFAULT 50,
-      san_max INTEGER DEFAULT 50,
-      temporary_insanity INTEGER DEFAULT 0,
-      indefinite_insanity INTEGER DEFAULT 0,
-      cash TEXT DEFAULT '',
-      assets TEXT DEFAULT '',
-      spending_level TEXT DEFAULT '',
-      appearance_desc TEXT DEFAULT '',
-      ideology TEXT DEFAULT '',
-      significant_people TEXT DEFAULT '',
-      meaningful_locations TEXT DEFAULT '',
-      treasured_possessions TEXT DEFAULT '',
-      traits TEXT DEFAULT '',
-      injuries_scars TEXT DEFAULT '',
-      phobias_manias TEXT DEFAULT '',
-      arcane_tomes TEXT DEFAULT '',
-      backstory TEXT DEFAULT '',
-      notes TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS skills (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER NOT NULL,
-      name TEXT NOT NULL,
-      base_value INTEGER DEFAULT 0,
-      value INTEGER DEFAULT 0,
-      is_occupation INTEGER DEFAULT 0,
-      is_interest INTEGER DEFAULT 0,
-      occ_points INTEGER DEFAULT 0,
-      int_points INTEGER DEFAULT 0,
-      game_points INTEGER DEFAULT 0,
-      FOREIGN KEY(character_id) REFERENCES characters(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS weapons (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER NOT NULL,
-      name TEXT DEFAULT '',
-      skill TEXT DEFAULT '',
-      damage TEXT DEFAULT '',
-      range TEXT DEFAULT '',
-      attacks_per_round TEXT DEFAULT '1',
-      ammo INTEGER DEFAULT 0,
-      malfunction INTEGER DEFAULT 100,
-      FOREIGN KEY(character_id) REFERENCES characters(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS possessions (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER NOT NULL,
-      item TEXT DEFAULT '',
-      FOREIGN KEY(character_id) REFERENCES characters(id)
-    );
-
-    CREATE TABLE IF NOT EXISTS dice_history (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      character_id INTEGER,
-      expression TEXT NOT NULL,
-      result INTEGER NOT NULL,
-      details TEXT DEFAULT '',
-      rolled_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS config (
-      key TEXT PRIMARY KEY,
-      value TEXT NOT NULL
-    );
-
-    CREATE TABLE IF NOT EXISTS evidence (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      title TEXT NOT NULL DEFAULT 'Nova Evidência',
-      description TEXT DEFAULT '',
-      session_tag TEXT DEFAULT '',
-      image TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now'))
-    );
-
-    CREATE TABLE IF NOT EXISTS npcs (
-      id INTEGER PRIMARY KEY AUTOINCREMENT,
-      name TEXT NOT NULL DEFAULT 'Novo NPC',
-      type TEXT DEFAULT 'npc',
-      description TEXT DEFAULT '',
-      str INTEGER DEFAULT 50,
-      dex INTEGER DEFAULT 50,
-      int_val INTEGER DEFAULT 50,
-      con INTEGER DEFAULT 50,
-      pow INTEGER DEFAULT 50,
-      siz INTEGER DEFAULT 50,
-      hp_current INTEGER DEFAULT 10,
-      hp_max INTEGER DEFAULT 10,
-      mp_current INTEGER DEFAULT 10,
-      mp_max INTEGER DEFAULT 10,
-      san_current INTEGER DEFAULT 50,
-      san_max INTEGER DEFAULT 50,
-      damage_bonus TEXT DEFAULT '',
-      build TEXT DEFAULT '',
-      armor INTEGER DEFAULT 0,
-      attacks TEXT DEFAULT '[]',
-      skills_text TEXT DEFAULT '',
-      special_abilities TEXT DEFAULT '',
-      notes TEXT DEFAULT '',
-      image TEXT DEFAULT '',
-      created_at TEXT DEFAULT (datetime('now')),
-      updated_at TEXT DEFAULT (datetime('now'))
-    );
-  `);
-
-  // ─── Migrations (always safe to re-run) ──────────────────
-  const migrations = [
+  // Migrations (safe to re-run)
+  const migs = [
     "ALTER TABLE characters ADD COLUMN image TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN uuid TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN cash TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN assets TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN spending_level TEXT DEFAULT ''",
     "ALTER TABLE characters ADD COLUMN is_friend INTEGER DEFAULT 0",
+    "ALTER TABLE characters ADD COLUMN session_token TEXT DEFAULT NULL",
     "ALTER TABLE skills ADD COLUMN occ_points INTEGER DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN int_points INTEGER DEFAULT 0",
     "ALTER TABLE skills ADD COLUMN game_points INTEGER DEFAULT 0",
+    "ALTER TABLE sessions ADD COLUMN share_token TEXT DEFAULT NULL",
   ];
-  for (const m of migrations) { try { db.run(m); } catch(e) {} }
+  for (const m of migs) { try { DB.run(m); } catch {} }
 
-  // Migrate existing skill data: populate occ_points/int_points from old is_occupation/is_interest flags
-  db.run(`UPDATE skills SET occ_points = MAX(0, value - base_value)
-    WHERE is_occupation = 1 AND occ_points = 0 AND int_points = 0 AND game_points = 0 AND value > base_value`);
-  db.run(`UPDATE skills SET int_points = MAX(0, value - base_value)
-    WHERE is_interest = 1 AND int_points = 0 AND occ_points = 0 AND game_points = 0 AND value > base_value`);
+  DB.run("UPDATE characters SET uuid = '' WHERE uuid IS NULL");
+  const noUuid = sqliteQuery("SELECT id FROM characters WHERE uuid = '' OR uuid IS NULL");
+  for (const row of noUuid) DB.run('UPDATE characters SET uuid = ? WHERE id = ?', [randomUUID(), row.id]);
+  sqliteSave();
 
-  // Generate UUIDs for characters that don't have one
-  db.run(`UPDATE characters SET uuid = '' WHERE uuid IS NULL`);
-  const noUuid = query("SELECT id FROM characters WHERE uuid = '' OR uuid IS NULL");
-  for (const row of noUuid) {
-    db.run('UPDATE characters SET uuid = ? WHERE id = ?', [randomUUID(), row.id]);
-  }
-
-  // Insert default config if not present
   for (const [key, value] of Object.entries(DEFAULT_CONFIG)) {
-    if (!queryOne('SELECT key FROM config WHERE key = ?', [key])) {
-      db.run('INSERT INTO config (key, value) VALUES (?, ?)', [key, value]);
+    if (!sqliteOne('SELECT key FROM config WHERE key = ?', [key])) {
+      DB.run('INSERT INTO config (key, value) VALUES (?, ?)', [key, value]);
     }
   }
+  sqliteSave();
+  console.log('[db] SQLite initialized');
 }
 
-// ─── Default Skills (CoC 7e) ─────────────────────────────────
+// ─── Default Skills ─────────────────────────────────────────
 const DEFAULT_SKILLS = [
   { name: 'Accounting (Contabilidade)', base: 5 },
   { name: 'Anthropology (Antropologia)', base: 1 },
@@ -285,606 +344,522 @@ const DEFAULT_SKILLS = [
   { name: 'Charm (Charme)', base: 15 },
   { name: 'Climb (Escalar)', base: 20 },
   { name: 'Computer Use (Computador)', base: 5 },
-  { name: 'Credit Rating (Crédito)', base: 0 },
+  { name: 'Credit Rating (Credito)', base: 0 },
   { name: 'Cthulhu Mythos (Mitos de Cthulhu)', base: 0 },
-  { name: 'Demolitions (Demolições)', base: 1 },
+  { name: 'Demolitions (Demolicoes)', base: 1 },
   { name: 'Disguise (Disfarce)', base: 5 },
   { name: 'Diving (Mergulho)', base: 1 },
   { name: 'Dodge (Esquivar)', base: 0 },
   { name: 'Drive Auto (Dirigir)', base: 20 },
-  { name: 'Elec. Repair (Rep. Elétrica)', base: 10 },
-  { name: 'Electronics (Eletrônica)', base: 1 },
+  { name: 'Elec. Repair (Rep. Eletrica)', base: 10 },
+  { name: 'Electronics (Eletronica)', base: 1 },
   { name: 'Fast Talk (Conversa Fiada)', base: 5 },
   { name: 'Fighting (Brawl) (Luta)', base: 25 },
   { name: 'Firearms (Handgun) (Pistola)', base: 20 },
   { name: 'Firearms (Rifle/Shotgun) (Rifle)', base: 25 },
   { name: 'Firearms (Submachine Gun) (Submetralhadora)', base: 15 },
   { name: 'First Aid (Primeiros Socorros)', base: 30 },
-  { name: 'History (História)', base: 5 },
+  { name: 'History (Historia)', base: 5 },
   { name: 'Intimidate (Intimidar)', base: 15 },
   { name: 'Jump (Saltar)', base: 20 },
   { name: 'Language (Other) (Idioma - Outro)', base: 1 },
-  { name: 'Language (Own) (Idioma - Próprio)', base: 0 },
+  { name: 'Language (Own) (Idioma - Proprio)', base: 0 },
   { name: 'Law (Direito)', base: 5 },
   { name: 'Library Use (Pesquisa em Biblioteca)', base: 20 },
   { name: 'Listen (Ouvir)', base: 20 },
-  { name: 'Locksmith (Ladrão de Cofres)', base: 1 },
-  { name: 'Mech. Repair (Rep. Mecânica)', base: 10 },
+  { name: 'Locksmith (Ladrao de Cofres)', base: 1 },
+  { name: 'Mech. Repair (Rep. Mecanica)', base: 10 },
   { name: 'Medicine (Medicina)', base: 1 },
   { name: 'Natural World (Mundo Natural)', base: 10 },
-  { name: 'Navigate (Navegação)', base: 10 },
+  { name: 'Navigate (Navegacao)', base: 10 },
   { name: 'Occult (Ocultismo)', base: 5 },
-  { name: 'Op. Heavy Machinery (Op. Máq. Pesada)', base: 1 },
+  { name: 'Op. Heavy Machinery (Op. Maq. Pesada)', base: 1 },
   { name: 'Persuade (Persuadir)', base: 10 },
   { name: 'Photography (Fotografia)', base: 1 },
   { name: 'Pilot (Pilotagem)', base: 1 },
   { name: 'Psychology (Psicologia)', base: 10 },
-  { name: 'Psychoanalysis (Psicanálise)', base: 1 },
+  { name: 'Psychoanalysis (Psicanalise)', base: 1 },
   { name: 'Read Lips (Leitura Labial)', base: 1 },
-  { name: 'Ride (Equitação)', base: 5 },
+  { name: 'Ride (Equitacao)', base: 5 },
   { name: 'Science (Biology) (Biologia)', base: 1 },
-  { name: 'Science (Botany) (Botânica)', base: 1 },
-  { name: 'Science (Chemistry) (Química)', base: 1 },
+  { name: 'Science (Botany) (Botanica)', base: 1 },
+  { name: 'Science (Chemistry) (Quimica)', base: 1 },
   { name: 'Science (Cryptography) (Criptografia)', base: 1 },
   { name: 'Science (Engineering) (Engenharia)', base: 1 },
   { name: 'Science (Forensics) (Forense)', base: 1 },
   { name: 'Science (Geology) (Geologia)', base: 1 },
-  { name: 'Science (Mathematics) (Matemática)', base: 1 },
+  { name: 'Science (Mathematics) (Matematica)', base: 1 },
   { name: 'Science (Meteorology) (Meteorologia)', base: 1 },
-  { name: 'Science (Pharmacy) (Farmácia)', base: 1 },
-  { name: 'Science (Physics) (Física)', base: 1 },
+  { name: 'Science (Pharmacy) (Farmacia)', base: 1 },
+  { name: 'Science (Physics) (Fisica)', base: 1 },
   { name: 'Science (Zoology) (Zoologia)', base: 1 },
-  { name: 'Sleight of Hand (Prestidigitação)', base: 10 },
+  { name: 'Sleight of Hand (Prestidigitacao)', base: 10 },
   { name: 'Spot Hidden (Detectar)', base: 25 },
   { name: 'Stealth (Furtividade)', base: 20 },
-  { name: 'Survival (Sobrevivência)', base: 10 },
+  { name: 'Survival (Sobrevivencia)', base: 10 },
   { name: 'Swim (Nadar)', base: 20 },
   { name: 'Throw (Arremesso)', base: 20 },
   { name: 'Track (Rastrear)', base: 10 },
 ];
 
-function createDefaultSkills(characterId, dex, edu) {
+async function createDefaultSkills(characterId, dex, edu) {
   for (const skill of DEFAULT_SKILLS) {
     let base = skill.base;
     if (skill.name.includes('Dodge')) base = Math.floor(dex / 2);
     if (skill.name.includes('Language (Own)')) base = edu;
-    // Credit Rating is always an occupation skill in CoC 7e
-    const isOcc = skill.name.includes('Credit Rating') ? 1 : 0;
-    db.run(
-      'INSERT INTO skills (character_id, name, base_value, value, is_occupation) VALUES (?, ?, ?, ?, ?)',
-      [characterId, skill.name, base, base, isOcc]
-    );
+    const isOcc = skill.name.includes('Credit Rating');
+    if (isPg) {
+      await DB.query(
+        'INSERT INTO skills (character_id, name, base_value, value, is_occupation) VALUES ($1,$2,$3,$4,$5)',
+        [characterId, skill.name, base, base, isOcc]
+      );
+    } else {
+      DB.run(
+        'INSERT INTO skills (character_id, name, base_value, value, is_occupation) VALUES (?,?,?,?,?)',
+        [characterId, skill.name, base, base, isOcc ? 1 : 0]
+      );
+    }
   }
-  saveDb();
+  if (!isPg) sqliteSave();
 }
+
+// ─── Auth ─────────────────────────────────────────────────────
+const authQueries = {
+  async register(username, password) {
+    const hash = await bcrypt.hash(password, 10);
+    if (isPg) {
+      try {
+        await DB.query(
+          'INSERT INTO users (username, password_hash, display_name) VALUES ($1,$2,$3)',
+          [username, hash, username]
+        );
+      } catch (e) {
+        if (e.code === '23505') return { error: 'Usuario ja existe' };
+        throw e;
+      }
+      return authQueries.getByUsername(username);
+    } else {
+      try {
+        DB.run('INSERT INTO users (username, password_hash, display_name) VALUES (?,?,?)', [username, hash, username]);
+        sqliteSave();
+      } catch (e) {
+        if (e.message?.includes('UNIQUE')) return { error: 'Usuario ja existe' };
+        throw e;
+      }
+      return sqliteOne('SELECT * FROM users WHERE username = ?', [username]);
+    }
+  },
+  async login(username, password) {
+    const user = isPg
+      ? (await DB.query('SELECT * FROM users WHERE username = $1', [username])).rows[0] || null
+      : sqliteOne('SELECT * FROM users WHERE username = ?', [username]);
+    if (!user) return null;
+    const ok = await bcrypt.compare(password, user.password_hash);
+    if (!ok) return null;
+    return user;
+  },
+  async getByUsername(username) {
+    return isPg
+      ? (await DB.query('SELECT * FROM users WHERE username = $1', [username])).rows[0] || null
+      : sqliteOne('SELECT * FROM users WHERE username = ?', [username]);
+  },
+  async setMaster(userId, isMaster) {
+    if (isPg) await DB.query('UPDATE users SET is_master = $1 WHERE id = $2', [isMaster, userId]);
+    else { DB.run('UPDATE users SET is_master = ? WHERE id = ?', [isMaster ? 1 : 0, userId]); sqliteSave(); }
+  },
+  async getById(id) {
+    return isPg
+      ? (await DB.query('SELECT id, username, is_master, display_name, created_at FROM users WHERE id = $1', [id])).rows[0] || null
+      : sqliteOne('SELECT id, username, is_master, display_name, created_at FROM users WHERE id = ?', [id]);
+  },
+};
 
 // ─── Character Queries ───────────────────────────────────────
 const characterQueries = {
-  listAll() {
-    return query('SELECT id, uuid, name, player, occupation, age FROM characters WHERE (is_friend = 0 OR is_friend IS NULL) ORDER BY updated_at DESC');
+  async listAll() { return await queryAll(isPg ? "SELECT id, uuid, name, player, occupation, age FROM characters WHERE NOT is_friend ORDER BY updated_at DESC" : "SELECT id, uuid, name, player, occupation, age FROM characters WHERE (is_friend = 0 OR is_friend IS NULL) ORDER BY updated_at DESC"); },
+  async listFriends() { return await queryAll(isPg ? "SELECT id, uuid, name, player, occupation, age FROM characters WHERE is_friend ORDER BY updated_at DESC" : "SELECT id, uuid, name, player, occupation, age FROM characters WHERE is_friend = 1 ORDER BY updated_at DESC"); },
+  async listBySessionToken(token) {
+    if (!token) return [];
+    return await queryAll(isPg ? "SELECT id, uuid, name, player, occupation, age FROM characters WHERE session_token = $1 ORDER BY updated_at DESC" : "SELECT id, uuid, name, player, occupation, age FROM characters WHERE session_token = ? ORDER BY updated_at DESC", [token]);
   },
-
-  getById(id) {
-    const c = queryOne('SELECT * FROM characters WHERE id = ?', [id]);
+  async getById(id) {
+    const c = await queryOne('SELECT * FROM characters WHERE id = ?', [id]);
     if (!c) return null;
-    c.skills      = query('SELECT * FROM skills WHERE character_id = ? ORDER BY name', [id]);
-    c.weapons     = query('SELECT * FROM weapons WHERE character_id = ?', [id]);
-    c.possessions = query('SELECT * FROM possessions WHERE character_id = ?', [id]);
+    c.skills = await queryAll('SELECT * FROM skills WHERE character_id = ? ORDER BY name', [id]);
+    c.weapons = await queryAll('SELECT * FROM weapons WHERE character_id = ?', [id]);
+    c.possessions = await queryAll('SELECT * FROM possessions WHERE character_id = ?', [id]);
     return c;
   },
-
-  getByUuid(uuid) {
+  async getByUuid(uuid) {
     if (!uuid) return null;
-    return queryOne('SELECT id FROM characters WHERE uuid = ?', [uuid]);
+    return await queryOne('SELECT id FROM characters WHERE uuid = ?', [uuid]);
   },
-
-  create(data) {
-    const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
-    const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
+  async create(data) {
+    const hpMax = data.hp_max ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
+    const mpMax = data.mp_max ?? Math.floor((data.pow || 50) / 5);
     const sanVal = data.san_max ?? (data.pow || 50) * 5;
-    const uuid   = data.uuid || randomUUID();
-    db.run(`
-      INSERT INTO characters
-        (uuid, name, player, occupation, age, gender, residence, birthplace,
-         str, dex, int_val, con, app, pow, siz, edu, luck,
-         hp_current, hp_max, mp_current, mp_max, san_current, san_max)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        uuid,
-        data.name || 'Novo Investigador',
-        data.player || '', data.occupation || '',
-        data.age || 25, data.gender || '', data.residence || '', data.birthplace || '',
-        data.str || 50, data.dex || 50, data.int_val || 50,
-        data.con || 50, data.app || 50, data.pow || 50,
-        data.siz || 50, data.edu || 50, data.luck || 50,
-        data.hp_current ?? hpMax, hpMax,
-        data.mp_current ?? mpMax, mpMax,
-        data.san_current ?? sanVal, sanVal,
-      ]
-    );
-    const id = lastInsertId();
-    saveDb();
-    createDefaultSkills(id, data.dex || 50, data.edu || 50);
-    return id;
-  },
-
-  // Internal: insert row only, no skills
-  _createRaw(data) {
-    const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
-    const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
-    const sanVal = data.san_max ?? (data.pow || 50) * 5;
-    const uuid   = data.uuid || randomUUID();
-    db.run(`
-      INSERT INTO characters
-        (uuid, name, player, occupation, age, gender, residence, birthplace,
-         str, dex, int_val, con, app, pow, siz, edu, luck,
-         hp_current, hp_max, mp_current, mp_max, san_current, san_max, is_friend)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        uuid,
-        data.name || 'Importado', data.player || '', data.occupation || '',
-        data.age || 25, data.gender || '', data.residence || '', data.birthplace || '',
-        data.str || 50, data.dex || 50, data.int_val || 50,
-        data.con || 50, data.app || 50, data.pow || 50,
-        data.siz || 50, data.edu || 50, data.luck || 50,
-        data.hp_current ?? hpMax, hpMax,
-        data.mp_current ?? mpMax, mpMax,
-        data.san_current ?? sanVal, sanVal,
-        data.is_friend || 0,
-      ]
-    );
-    const id = lastInsertId();
-    // Copy remaining text fields
-    const textFields = [
-      'appearance_desc','ideology','significant_people','meaningful_locations',
-      'treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes',
-      'backstory','notes','image','cash','assets','spending_level',
-    ];
-    const updates = {};
-    textFields.forEach(f => { if (data[f]) updates[f] = data[f]; });
-    if (Object.keys(updates).length) {
-      const setClause = Object.keys(updates).map(f => `${f} = ?`).join(', ');
-      db.run(`UPDATE characters SET ${setClause} WHERE id = ?`, [...Object.values(updates), id]);
+    const uuid = data.uuid || randomUUID();
+    const isFr = !!data.is_friend;
+    const st = data.session_token || null;
+    const cols = `(uuid,name,player,occupation,age,gender,residence,birthplace,str,dex,int_val,con,app,pow,siz,edu,luck,hp_current,hp_max,mp_current,mp_max,san_current,san_max,is_friend,session_token)`;
+    if (isPg) {
+      const res = await DB.query(`INSERT INTO characters ${cols} VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25) RETURNING id`,
+        [uuid, data.name||'Novo Investigador', data.player||'', data.occupation||'', data.age||25, data.gender||'', data.residence||'', data.birthplace||'',
+         data.str||50, data.dex||50, data.int_val||50, data.con||50, data.app||50, data.pow||50, data.siz||50, data.edu||50, data.luck||50,
+         data.hp_current ?? hpMax, hpMax, data.mp_current ?? mpMax, mpMax, data.san_current ?? sanVal, sanVal, isFr, st]);
+      const id = res.rows[0].id;
+      await createDefaultSkills(id, data.dex || 50, data.edu || 50);
+      return id;
+    } else {
+      DB.run(`INSERT INTO characters ${cols} VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [uuid, data.name||'Novo Investigador', data.player||'', data.occupation||'', data.age||25, data.gender||'', data.residence||'', data.birthplace||'',
+         data.str||50, data.dex||50, data.int_val||50, data.con||50, data.app||50, data.pow||50, data.siz||50, data.edu||50, data.luck||50,
+         data.hp_current ?? hpMax, hpMax, data.mp_current ?? mpMax, mpMax, data.san_current ?? sanVal, sanVal, isFr ? 1 : 0, st]);
+      const id = sqliteQuery('SELECT last_insert_rowid() as id')[0].id;
+      sqliteSave();
+      await createDefaultSkills(id, data.dex || 50, data.edu || 50);
+      return id;
     }
-    saveDb();
-    return id;
   },
 
-  // Import: creates character + restores skills/weapons/possessions from JSON
-  // If character UUID already exists, updates instead of inserting
-  import(data) {
-    // Check if UUID already exists → update
+  async import(data) {
+    // UUID dedup → update instead
     if (data.uuid) {
-      const existing = this.getByUuid(data.uuid);
-      if (existing) {
-        return this._updateFromImport(existing.id, data);
-      }
+      const existing = await this.getByUuid(data.uuid);
+      if (existing) return await this._updateFromImport(existing.id, data);
     }
+    // Create character
+    const hpMax = data.hp_max ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
+    const mpMax = data.mp_max ?? Math.floor((data.pow || 50) / 5);
+    const sanVal = data.san_max ?? (data.pow || 50) * 5;
+    const uuid = data.uuid || randomUUID();
 
-    const id = this._createRaw(data);
-    this._importRelations(id, data);
+    let id;
+    if (isPg) {
+      const res = await DB.query(
+        `INSERT INTO characters (uuid,name,player,occupation,age,gender,residence,birthplace,str,dex,int_val,con,app,pow,siz,edu,luck,hp_current,hp_max,mp_current,mp_max,san_current,san_max,is_friend) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24) RETURNING id`,
+        [uuid, data.name||'Importado', data.player||'', data.occupation||'', data.age||25, data.gender||'', data.residence||'', data.birthplace||'',
+         data.str||50, data.dex||50, data.int_val||50, data.con||50, data.app||50, data.pow||50, data.siz||50, data.edu||50, data.luck||50,
+         data.hp_current ?? hpMax, hpMax, data.mp_current ?? mpMax, mpMax, data.san_current ?? sanVal, sanVal, !!data.is_friend]);
+      id = res.rows[0].id;
+      // Text fields
+      const textFields = ['appearance_desc','ideology','significant_people','meaningful_locations','treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes','backstory','notes','image','cash','assets','spending_level'];
+      for (const f of textFields) {
+        if (data[f]) await DB.query(`UPDATE characters SET ${f} = $1 WHERE id = $2`, [data[f], id]);
+      }
+    } else {
+      DB.run(`INSERT INTO characters (uuid,name,player,occupation,age,gender,residence,birthplace,str,dex,int_val,con,app,pow,siz,edu,luck,hp_current,hp_max,mp_current,mp_max,san_current,san_max,is_friend) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        [uuid, data.name||'Importado', data.player||'', data.occupation||'', data.age||25, data.gender||'', data.residence||'', data.birthplace||'',
+         data.str||50, data.dex||50, data.int_val||50, data.con||50, data.app||50, data.pow||50, data.siz||50, data.edu||50, data.luck||50,
+         data.hp_current ?? hpMax, hpMax, data.mp_current ?? mpMax, mpMax, data.san_current ?? sanVal, sanVal, data.is_friend ? 1 : 0]);
+      id = sqliteQuery('SELECT last_insert_rowid() as id')[0].id;
+      // Text fields
+      const textFields = ['appearance_desc','ideology','significant_people','meaningful_locations','treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes','backstory','notes','image','cash','assets','spending_level'];
+      for (const f of textFields) {
+        if (data[f]) DB.run(`UPDATE characters SET ${f} = ? WHERE id = ?`, [data[f], id]);
+      }
+      sqliteSave();
+    }
+    await this._importRelations(id, data);
     return id;
   },
-
-  _updateFromImport(id, data) {
-    const allowed = [
-      'name','player','occupation','age','gender','residence','birthplace',
-      'str','dex','int_val','con','app','pow','siz','edu','luck',
-      'hp_current','hp_max','mp_current','mp_max','san_current','san_max',
-      'appearance_desc','ideology','significant_people','meaningful_locations',
-      'treasured_possessions','traits','injuries_scars','phobias_manias',
-      'arcane_tomes','backstory','notes','image','cash','assets','spending_level',
-    ];
+  async _updateFromImport(id, data) {
+    const allowed = ['name','player','occupation','age','gender','residence','birthplace','str','dex','int_val','con','app','pow','siz','edu','luck','hp_current','hp_max','mp_current','mp_max','san_current','san_max','is_friend','appearance_desc','ideology','significant_people','meaningful_locations','treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes','backstory','notes','image','cash','assets','spending_level'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (fields.length) {
-      const setClause = fields.map(f => `${f} = ?`).join(', ');
-      db.run(
-        `UPDATE characters SET ${setClause}, updated_at = datetime('now') WHERE id = ?`,
-        [...fields.map(f => data[f]), id]
-      );
+      const p = (i) => isPg ? `$${i}` : '?';
+      const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+      await run(`UPDATE characters SET ${set}, updated_at = ${isPg ? 'NOW()' : "datetime('now')"} WHERE id = ${p(fields.length + 1)}`, [...fields.map(f => data[f]), id]);
     }
-    // Update skills if provided
     if (data.skills?.length) {
-      db.run('DELETE FROM skills WHERE character_id = ?', [id]);
+      await run('DELETE FROM skills WHERE character_id = ?', [id]);
       for (const s of data.skills) {
-        db.run(
-          'INSERT INTO skills (character_id, name, base_value, value, is_occupation, is_interest, occ_points, int_points, game_points) VALUES (?,?,?,?,?,?,?,?,?)',
-          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]
-        );
+        await run('INSERT INTO skills (character_id,name,base_value,value,is_occupation,is_interest,occ_points,int_points,game_points) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]);
       }
     }
-    // Update weapons if provided
     if (data.weapons?.length) {
-      db.run('DELETE FROM weapons WHERE character_id = ?', [id]);
+      await run('DELETE FROM weapons WHERE character_id = ?', [id]);
       for (const w of data.weapons) {
-        db.run(
-          'INSERT INTO weapons (character_id, name, skill, damage, range, attacks_per_round, ammo, malfunction) VALUES (?,?,?,?,?,?,?,?)',
-          [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]
-        );
+        await run('INSERT INTO weapons (character_id,name,skill,damage,range,attacks_per_round,ammo,malfunction) VALUES (?,?,?,?,?,?,?,?)',
+          [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]);
       }
     }
-    saveDb();
+    if (!isPg) sqliteSave();
     return id;
   },
-
-  _importRelations(id, data) {
+  async _importRelations(id, data) {
     if (data.skills?.length) {
       for (const s of data.skills) {
-        db.run(
-          'INSERT INTO skills (character_id, name, base_value, value, is_occupation, is_interest, occ_points, int_points, game_points) VALUES (?,?,?,?,?,?,?,?,?)',
-          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]
-        );
+        await run('INSERT INTO skills (character_id,name,base_value,value,is_occupation,is_interest,occ_points,int_points,game_points) VALUES (?,?,?,?,?,?,?,?,?)',
+          [id, s.name, s.base_value||0, s.value||0, s.is_occupation||0, s.is_interest||0, s.occ_points||0, s.int_points||0, s.game_points||0]);
       }
-      saveDb();
     } else {
-      createDefaultSkills(id, data.dex||50, data.edu||50);
+      await createDefaultSkills(id, data.dex||50, data.edu||50);
     }
-
     for (const w of (data.weapons||[])) {
-      db.run(
-        'INSERT INTO weapons (character_id, name, skill, damage, range, attacks_per_round, ammo, malfunction) VALUES (?,?,?,?,?,?,?,?)',
-        [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]
-      );
+      await run('INSERT INTO weapons (character_id,name,skill,damage,range,attacks_per_round,ammo,malfunction) VALUES (?,?,?,?,?,?,?,?)',
+        [id, w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100]);
     }
     for (const p of (data.possessions||[])) {
-      db.run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [id, p.item||'']);
+      await run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [id, p.item||'']);
     }
-    saveDb();
+    if (!isPg) sqliteSave();
   },
-
-  update(id, data) {
-    const allowed = [
-      'name','player','occupation','age','gender','residence','birthplace',
-      'str','dex','int_val','con','app','pow','siz','edu','luck',
-      'hp_current','hp_max','mp_current','mp_max','san_current','san_max',
-      'temporary_insanity','indefinite_insanity',
-      'appearance_desc','ideology','significant_people','meaningful_locations',
-      'treasured_possessions','traits','injuries_scars','phobias_manias',
-      'arcane_tomes','backstory','notes','image',
-      'cash','assets','spending_level',
-    ];
+  async update(id, data) {
+    const allowed = ['name','player','occupation','age','gender','residence','birthplace','str','dex','int_val','con','app','pow','siz','edu','luck','hp_current','hp_max','mp_current','mp_max','san_current','san_max','temporary_insanity','indefinite_insanity','appearance_desc','ideology','significant_people','meaningful_locations','treasured_possessions','traits','injuries_scars','phobias_manias','arcane_tomes','backstory','notes','image','cash','assets','spending_level','session_token'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(
-      `UPDATE characters SET ${setClause}, updated_at = datetime('now') WHERE id = ?`,
-      [...fields.map(f => data[f]), id]
-    );
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE characters SET ${set}, updated_at = ${isPg ? 'NOW()' : "datetime('now')"} WHERE id = ${p(fields.length + 1)}`, [...fields.map(f => data[f]), id]);
   },
-
-  delete(id) {
-    ['skills','weapons','possessions','dice_history'].forEach(t =>
-      db.run(`DELETE FROM ${t} WHERE character_id = ?`, [id])
-    );
-    db.run('DELETE FROM characters WHERE id = ?', [id]);
-    saveDb();
+  async delete(id) {
+    await run('DELETE FROM skills WHERE character_id = ?', [id]);
+    await run('DELETE FROM weapons WHERE character_id = ?', [id]);
+    await run('DELETE FROM possessions WHERE character_id = ?', [id]);
+    await run('DELETE FROM dice_history WHERE character_id = ?', [id]);
+    await run('DELETE FROM characters WHERE id = ?', [id]);
   },
 };
 
 // ─── Skill Queries ───────────────────────────────────────────
 const skillQueries = {
-  update(id, data) {
-    // Support both old-style (value + is_occupation + is_interest)
-    // and new-style (occ_points + int_points + game_points)
+  async update(id, data) {
     if (data.occ_points !== undefined || data.int_points !== undefined || data.game_points !== undefined) {
-      // Get current base_value
-      const skill = queryOne('SELECT base_value FROM skills WHERE id = ?', [id]);
+      const skill = await queryOne('SELECT base_value FROM skills WHERE id = ?', [id]);
       const base = skill?.base_value ?? 0;
-      const occ  = data.occ_points ?? 0;
+      const occ = data.occ_points ?? 0;
       const int_ = data.int_points ?? 0;
       const game = data.game_points ?? 0;
       const total = base + occ + int_ + game;
-      db.run(
-        'UPDATE skills SET occ_points=?, int_points=?, game_points=?, value=?, is_occupation=?, is_interest=? WHERE id=?',
-        [occ, int_, game, total, occ > 0 ? 1 : 0, int_ > 0 ? 1 : 0, id]
-      );
+      const occB = occ > 0; const intB = int_ > 0;
+      const occV = isPg ? occB : (occB ? 1 : 0);
+      const intV = isPg ? intB : (intB ? 1 : 0);
+      await run('UPDATE skills SET occ_points=?, int_points=?, game_points=?, value=?, is_occupation=?, is_interest=? WHERE id=?',
+        [occ, int_, game, total, occV, intV, id]);
     } else {
-      db.run(
-        'UPDATE skills SET value=?, is_occupation=?, is_interest=? WHERE id=?',
-        [data.value, data.is_occupation ? 1 : 0, data.is_interest ? 1 : 0, id]
-      );
+      const occV = isPg ? (!!data.is_occupation) : (data.is_occupation ? 1 : 0);
+      const intV = isPg ? (!!data.is_interest) : (data.is_interest ? 1 : 0);
+      await run('UPDATE skills SET value=?, is_occupation=?, is_interest=? WHERE id=?',
+        [data.value, occV, intV, id]);
     }
-    saveDb();
   },
-  updateByName(characterId, nameLike, base) {
-    db.run(
-      "UPDATE skills SET base_value=? WHERE character_id=? AND name LIKE ?",
-      [base, characterId, `%${nameLike}%`]
-    );
-    saveDb();
+  async updateByName(characterId, nameLike, base) {
+    await run("UPDATE skills SET base_value=? WHERE character_id=? AND name LIKE ?", [base, characterId, `%${nameLike}%`]);
   },
 };
 
 // ─── Weapon Queries ──────────────────────────────────────────
 const weaponQueries = {
-  create(characterId) {
-    db.run('INSERT INTO weapons (character_id) VALUES (?)', [characterId]);
-    const id = lastInsertId(); saveDb(); return id;
+  async create(characterId) {
+    if (isPg) { const r = await DB.query('INSERT INTO weapons (character_id) VALUES ($1) RETURNING id', [characterId]); return r.rows[0].id; }
+    DB.run('INSERT INTO weapons (character_id) VALUES (?)', [characterId]);
+    sqliteSave();
+    return sqliteQuery('SELECT last_insert_rowid() as id')[0].id;
   },
-  update(id, data) {
-    db.run(
-      'UPDATE weapons SET name=?,skill=?,damage=?,range=?,attacks_per_round=?,ammo=?,malfunction=? WHERE id=?',
-      [data.name,data.skill,data.damage,data.range,data.attacks_per_round,data.ammo,data.malfunction,id]
-    );
-    saveDb();
+  async update(id, data) {
+    await run('UPDATE weapons SET name=?,skill=?,damage=?,range=?,attacks_per_round=?,ammo=?,malfunction=? WHERE id=?',
+      [data.name,data.skill,data.damage,data.range,data.attacks_per_round,data.ammo,data.malfunction,id]);
   },
-  delete(id) { db.run('DELETE FROM weapons WHERE id=?', [id]); saveDb(); },
+  async delete(id) { await run('DELETE FROM weapons WHERE id=?', [id]); },
 };
 
 // ─── Possession Queries ──────────────────────────────────────
 const possessionQueries = {
-  create(characterId, item) {
-    db.run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [characterId, item]);
-    const id = lastInsertId(); saveDb(); return id;
+  async create(characterId, item) {
+    if (isPg) { const r = await DB.query('INSERT INTO possessions (character_id, item) VALUES ($1,$2) RETURNING id', [characterId, item]); return r.rows[0].id; }
+    DB.run('INSERT INTO possessions (character_id, item) VALUES (?,?)', [characterId, item]);
+    sqliteSave();
+    return sqliteQuery('SELECT last_insert_rowid() as id')[0].id;
   },
-  update(id, item) { db.run('UPDATE possessions SET item=? WHERE id=?', [item, id]); saveDb(); },
-  delete(id) { db.run('DELETE FROM possessions WHERE id=?', [id]); saveDb(); },
+  async update(id, item) { await run('UPDATE possessions SET item=? WHERE id=?', [item, id]); },
+  async delete(id) { await run('DELETE FROM possessions WHERE id=?', [id]); },
 };
 
 // ─── Dice Queries ────────────────────────────────────────────
 const diceQueries = {
-  addHistory(characterId, expression, result, details) {
-    db.run(
-      'INSERT INTO dice_history (character_id, expression, result, details) VALUES (?,?,?,?)',
-      [characterId || null, expression, result, details]
-    );
-    saveDb();
+  async addHistory(characterId, expression, result, details) {
+    await run('INSERT INTO dice_history (character_id, expression, result, details) VALUES (?,?,?,?)',
+      [characterId||null, expression, result, details]);
   },
-  getHistory(characterId, limit = 20) {
+  async getHistory(characterId, limit = 20) {
     return characterId
-      ? query('SELECT * FROM dice_history WHERE character_id=? ORDER BY rolled_at DESC LIMIT ?', [characterId, limit])
-      : query('SELECT * FROM dice_history ORDER BY rolled_at DESC LIMIT ?', [limit]);
+      ? await queryAll('SELECT * FROM dice_history WHERE character_id=? ORDER BY rolled_at DESC LIMIT ?', [characterId, limit])
+      : await queryAll('SELECT * FROM dice_history ORDER BY rolled_at DESC LIMIT ?', [limit]);
   },
 };
 
 // ─── Config Queries ──────────────────────────────────────────
 const configQueries = {
-  getAll() {
-    const rows = query('SELECT key, value FROM config');
+  async getAll() {
+    const rows = await queryAll('SELECT key, value FROM config');
     const obj = {};
     rows.forEach(r => obj[r.key] = r.value);
     return obj;
   },
-  set(key, value) {
-    if (queryOne('SELECT key FROM config WHERE key=?', [key])) {
-      db.run('UPDATE config SET value=? WHERE key=?', [value, key]);
-    } else {
-      db.run('INSERT INTO config (key, value) VALUES (?,?)', [key, value]);
-    }
-    saveDb();
+  async set(key, value) {
+    const exists = await queryOne('SELECT key FROM config WHERE key=?', [key]);
+    if (exists) await run('UPDATE config SET value=? WHERE key=?', [value, key]);
+    else await run('INSERT INTO config (key, value) VALUES (?,?)', [key, value]);
   },
-  resetToDefaults() {
+  async resetToDefaults() {
     for (const [k, v] of Object.entries(DEFAULT_CONFIG)) {
-      db.run('INSERT OR REPLACE INTO config (key, value) VALUES (?,?)', [k, v]);
+      if (isPg) await DB.query('INSERT INTO config (key, value) VALUES ($1,$2) ON CONFLICT (key) DO UPDATE SET value = $2', [k, v]);
+      else await run('INSERT OR REPLACE INTO config (key, value) VALUES (?,?)', [k, v]);
     }
-    saveDb();
     return DEFAULT_CONFIG;
   },
 };
 
 // ─── Evidence Queries ────────────────────────────────────────
 const evidenceQueries = {
-  listAll() {
-    return query('SELECT * FROM evidence ORDER BY created_at DESC');
+  async listAll() { return await queryAll('SELECT * FROM evidence ORDER BY created_at DESC'); },
+  async getById(id) { return await queryOne('SELECT * FROM evidence WHERE id = ?', [id]); },
+  async create(data) {
+    return await insertRow('INSERT INTO evidence (title, description, session_tag, image) VALUES (?,?,?,?)',
+      [data.title||'Nova Evidencia', data.description||'', data.session_tag||'', data.image||'']);
   },
-  getById(id) {
-    return queryOne('SELECT * FROM evidence WHERE id = ?', [id]);
-  },
-  create(data) {
-    db.run(
-      'INSERT INTO evidence (title, description, session_tag, image) VALUES (?, ?, ?, ?)',
-      [data.title || 'Nova Evidência', data.description || '', data.session_tag || '', data.image || '']
-    );
-    const id = lastInsertId();
-    saveDb();
-    return id;
-  },
-  update(id, data) {
-    const allowed = ['title', 'description', 'session_tag', 'image'];
+  async update(id, data) {
+    const allowed = ['title','description','session_tag','image'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(`UPDATE evidence SET ${setClause} WHERE id = ?`, [...fields.map(f => data[f]), id]);
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE evidence SET ${set} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => data[f]), id]);
   },
-  delete(id) {
-    db.run('DELETE FROM evidence WHERE id = ?', [id]);
-    saveDb();
-  },
+  async delete(id) { await run('DELETE FROM evidence WHERE id = ?', [id]); },
 };
 
 // ─── Weapon Catalog Queries ──────────────────────────────────
 const weaponCatalogQueries = {
-  listAll() {
-    return query('SELECT * FROM weapon_catalog ORDER BY category, name');
+  async listAll() { return await queryAll('SELECT * FROM weapon_catalog ORDER BY category, name'); },
+  async getById(id) { return await queryOne('SELECT * FROM weapon_catalog WHERE id = ?', [id]); },
+  async create(data) {
+    return await insertRow('INSERT INTO weapon_catalog (name,skill,damage,range,attacks_per_round,ammo,malfunction,category,notes) VALUES (?,?,?,?,?,?,?,?,?)',
+      [data.name||'', data.skill||'', data.damage||'', data.range||'', data.attacks_per_round||'1', data.ammo||0, data.malfunction||100, data.category||'other', data.notes||'']);
   },
-  getById(id) {
-    return queryOne('SELECT * FROM weapon_catalog WHERE id = ?', [id]);
-  },
-  create(data) {
-    db.run(
-      'INSERT INTO weapon_catalog (name, skill, damage, range, attacks_per_round, ammo, malfunction, category, notes) VALUES (?,?,?,?,?,?,?,?,?)',
-      [data.name||'', data.skill||'', data.damage||'', data.range||'', data.attacks_per_round||'1', data.ammo||0, data.malfunction||100, data.category||'other', data.notes||'']
-    );
-    const id = lastInsertId(); saveDb(); return id;
-  },
-  update(id, data) {
+  async update(id, data) {
     const allowed = ['name','skill','damage','range','attacks_per_round','ammo','malfunction','category','notes'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(`UPDATE weapon_catalog SET ${setClause} WHERE id = ?`, [...fields.map(f => data[f]), id]);
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE weapon_catalog SET ${set} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => data[f]), id]);
   },
-  delete(id) { db.run('DELETE FROM weapon_catalog WHERE id = ?', [id]); saveDb(); },
-  importBulk(items) {
+  async delete(id) { await run('DELETE FROM weapon_catalog WHERE id = ?', [id]); },
+  async importBulk(items) {
     for (const w of items) {
-      const existing = queryOne('SELECT id FROM weapon_catalog WHERE name = ?', [w.name]);
+      const existing = await queryOne('SELECT id FROM weapon_catalog WHERE name = ?', [w.name]);
       if (existing) {
         const allowed = ['skill','damage','range','attacks_per_round','ammo','malfunction','category','notes'];
         const fields = allowed.filter(k => w[k] !== undefined);
         if (fields.length) {
-          const setClause = fields.map(f => `${f} = ?`).join(', ');
-          db.run(`UPDATE weapon_catalog SET ${setClause} WHERE id = ?`, [...fields.map(f => w[f]), existing.id]);
+          const p = (i) => isPg ? `$${i}` : '?';
+          const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+          await run(`UPDATE weapon_catalog SET ${set} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => w[f]), existing.id]);
         }
       } else {
-        db.run(
-          'INSERT INTO weapon_catalog (name, skill, damage, range, attacks_per_round, ammo, malfunction, category, notes) VALUES (?,?,?,?,?,?,?,?,?)',
-          [w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100, w.category||'other', w.notes||'']
-        );
+        await run('INSERT INTO weapon_catalog (name,skill,damage,range,attacks_per_round,ammo,malfunction,category,notes) VALUES (?,?,?,?,?,?,?,?,?)',
+          [w.name||'', w.skill||'', w.damage||'', w.range||'', w.attacks_per_round||'1', w.ammo||0, w.malfunction||100, w.category||'other', w.notes||'']);
       }
     }
-    saveDb();
   },
 };
 
 // ─── Session Queries ─────────────────────────────────────────
 const sessionQueries = {
-  listAll() {
-    return query('SELECT * FROM sessions ORDER BY updated_at DESC');
+  async listAll() { return await queryAll('SELECT * FROM sessions ORDER BY updated_at DESC'); },
+  async getById(id) { return await queryOne('SELECT * FROM sessions WHERE id = ?', [id]); },
+  async getActive() { return await queryOne(isPg ? "SELECT * FROM sessions WHERE is_active = true ORDER BY updated_at DESC" : "SELECT * FROM sessions WHERE is_active = 1 ORDER BY updated_at DESC"); },
+  async create(data) {
+    await run('UPDATE sessions SET is_active = ' + (isPg ? 'false' : '0'));
+    const act = isPg ? 'false' : '1';
+    return await insertRow(`INSERT INTO sessions (name, role, character_id, notes, is_active) VALUES (?,?,?,?,' + act + ')`,
+      [data.name||'Nova Sessao', data.role||'player', data.character_id||null, data.notes||'']);
   },
-  getById(id) {
-    return queryOne('SELECT * FROM sessions WHERE id = ?', [id]);
-  },
-  getActive() {
-    return queryOne('SELECT * FROM sessions WHERE is_active = 1 ORDER BY updated_at DESC');
-  },
-  create(data) {
-    db.run('UPDATE sessions SET is_active = 0');
-    db.run(
-      'INSERT INTO sessions (name, role, character_id, notes, is_active) VALUES (?,?,?,?,1)',
-      [data.name||'Nova Sessão', data.role||'player', data.character_id||null, data.notes||'']
-    );
-    const id = lastInsertId(); saveDb(); return id;
-  },
-  update(id, data) {
-    const allowed = ['name','role','character_id','notes','is_active'];
+  async update(id, data) {
+    const allowed = ['name','role','character_id','notes','is_active','share_token'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(`UPDATE sessions SET ${setClause}, updated_at = datetime('now') WHERE id = ?`, [...fields.map(f => data[f]), id]);
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE sessions SET ${set}, updated_at = ${isPg ? 'NOW()' : "datetime('now')"} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => data[f]), id]);
   },
-  activate(id) {
-    db.run('UPDATE sessions SET is_active = 0');
-    db.run("UPDATE sessions SET is_active = 1, updated_at = datetime('now') WHERE id = ?", [id]);
-    saveDb();
+  async generateShareToken(id) {
+    const token = randomUUID();
+    await run(isPg ? 'UPDATE sessions SET share_token = $1 WHERE id = $2' : 'UPDATE sessions SET share_token = ? WHERE id = ?', [token, id]);
+    return token;
   },
-  delete(id) {
-    db.run('DELETE FROM sessions WHERE id = ?', [id]);
-    saveDb();
+  async getByShareToken(token) {
+    if (!token) return null;
+    return await queryOne(isPg ? "SELECT * FROM sessions WHERE share_token = $1 AND is_active = true" : "SELECT * FROM sessions WHERE share_token = ? AND is_active = 1", [token]);
   },
+  async activate(id) {
+    await run('UPDATE sessions SET is_active = ' + (isPg ? 'false' : '0'));
+    await run(`UPDATE sessions SET is_active = ${isPg ? 'true' : '1'}, updated_at = ${isPg ? 'NOW()' : "datetime('now')"} WHERE id = $1`, [id]);
+  },
+  async delete(id) { await run('DELETE FROM sessions WHERE id = ?', [id]); },
 };
 
-// ─── NPC / Inimigo Queries ───────────────────────────────────
+// ─── NPC Queries ─────────────────────────────────────────────
 const npcQueries = {
-  listAll() {
-    return query('SELECT id, name, type, description, hp_current, hp_max, mp_current, mp_max, san_current, san_max, armor, image, created_at FROM npcs ORDER BY type, name');
+  async listAll() { return await queryAll('SELECT id, name, type, description, hp_current, hp_max, mp_current, mp_max, san_current, san_max, armor, image, created_at FROM npcs ORDER BY type, name'); },
+  async getById(id) { return await queryOne('SELECT * FROM npcs WHERE id = ?', [id]); },
+  async create(data) {
+    const hpMax = data.hp_max ?? Math.floor(((data.con||50) + (data.siz||50)) / 10);
+    const mpMax = data.mp_max ?? Math.floor((data.pow||50) / 5);
+    const sanMax = data.san_max ?? (data.type === 'monster' ? 0 : (data.pow||50) * 5);
+    return await insertRow(`INSERT INTO npcs (name,type,description,str,dex,int_val,con,pow,siz,hp_current,hp_max,mp_current,mp_max,san_current,san_max,damage_bonus,build,armor,attacks,skills_text,special_abilities,notes) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      [data.name||'Novo NPC', data.type||'npc', data.description||'',
+       data.str||50, data.dex||50, data.int_val||50, data.con||50, data.pow||50, data.siz||50,
+       data.hp_current ?? hpMax, hpMax, data.mp_current ?? mpMax, mpMax,
+       data.san_current ?? sanMax, sanMax, data.damage_bonus||'', data.build||'', data.armor||0,
+       data.attacks||'[]', data.skills_text||'', data.special_abilities||'', data.notes||'']);
   },
-
-  getById(id) {
-    return queryOne('SELECT * FROM npcs WHERE id = ?', [id]);
-  },
-
-  create(data) {
-    const hpMax  = data.hp_max  ?? Math.floor(((data.con || 50) + (data.siz || 50)) / 10);
-    const mpMax  = data.mp_max  ?? Math.floor((data.pow || 50) / 5);
-    const sanMax = data.san_max ?? (data.type === 'monster' ? 0 : (data.pow || 50) * 5);
-    db.run(`
-      INSERT INTO npcs
-        (name, type, description, str, dex, int_val, con, pow, siz,
-         hp_current, hp_max, mp_current, mp_max, san_current, san_max,
-         damage_bonus, build, armor, attacks, skills_text, special_abilities, notes)
-      VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-      [
-        data.name || 'Novo NPC', data.type || 'npc', data.description || '',
-        data.str || 50, data.dex || 50, data.int_val || 50,
-        data.con || 50, data.pow || 50, data.siz || 50,
-        data.hp_current ?? hpMax, hpMax,
-        data.mp_current ?? mpMax, mpMax,
-        data.san_current ?? sanMax, sanMax,
-        data.damage_bonus || '', data.build || '',
-        data.armor || 0,
-        data.attacks || '[]',
-        data.skills_text || '',
-        data.special_abilities || '',
-        data.notes || '',
-      ]
-    );
-    const id = lastInsertId();
-    saveDb();
-    return id;
-  },
-
-  update(id, data) {
-    const allowed = [
-      'name', 'type', 'description',
-      'str', 'dex', 'int_val', 'con', 'pow', 'siz',
-      'hp_current', 'hp_max', 'mp_current', 'mp_max', 'san_current', 'san_max',
-      'damage_bonus', 'build', 'armor',
-      'attacks', 'skills_text', 'special_abilities', 'notes', 'image',
-    ];
+  async update(id, data) {
+    const allowed = ['name','type','description','str','dex','int_val','con','pow','siz','hp_current','hp_max','mp_current','mp_max','san_current','san_max','damage_bonus','build','armor','attacks','skills_text','special_abilities','notes','image'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(
-      `UPDATE npcs SET ${setClause}, updated_at = datetime('now') WHERE id = ?`,
-      [...fields.map(f => data[f]), id]
-    );
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE npcs SET ${set}, updated_at = ${isPg ? 'NOW()' : "datetime('now')"} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => data[f]), id]);
   },
-
-  delete(id) {
-    db.run('DELETE FROM npcs WHERE id = ?', [id]);
-    saveDb();
-  },
+  async delete(id) { await run('DELETE FROM npcs WHERE id = ?', [id]); },
 };
 
-// ─── Session Log Queries ──────────────────────────────────────
+// ─── Session Log Queries ─────────────────────────────────────
 const sessionLogQueries = {
-  list(sessionId) {
-    return query('SELECT * FROM session_log_entries WHERE session_id = ? ORDER BY created_at DESC', [sessionId]);
+  async list(sessionId) { return await queryAll('SELECT * FROM session_log_entries WHERE session_id = ? ORDER BY created_at DESC', [sessionId]); },
+  async create(sessionId, content) {
+    return await insertRow('INSERT INTO session_log_entries (session_id, content) VALUES (?,?)', [sessionId, content]);
   },
-  create(sessionId, content) {
-    db.run('INSERT INTO session_log_entries (session_id, content) VALUES (?,?)', [sessionId, content]);
-    const id = lastInsertId(); saveDb(); return id;
-  },
-  delete(id) {
-    db.run('DELETE FROM session_log_entries WHERE id = ?', [id]);
-    saveDb();
-  },
+  async delete(id) { await run('DELETE FROM session_log_entries WHERE id = ?', [id]); },
 };
 
-// ─── PDF Annotation Queries ───────────────────────────────────
+// ─── PDF Annotation Queries ──────────────────────────────────
 const annotationQueries = {
-  list(filename) {
-    return query('SELECT * FROM pdf_annotations WHERE filename = ? ORDER BY page, created_at', [filename]);
+  async list(filename) { return await queryAll('SELECT * FROM pdf_annotations WHERE filename = ? ORDER BY page, created_at', [filename]); },
+  async create(data) {
+    return await insertRow('INSERT INTO pdf_annotations (filename, page, note, color) VALUES (?,?,?,?)',
+      [data.filename, data.page||1, data.note||'', data.color||'yellow']);
   },
-  create(data) {
-    db.run('INSERT INTO pdf_annotations (filename, page, note, color) VALUES (?,?,?,?)',
-      [data.filename, data.page || 1, data.note || '', data.color || 'yellow']);
-    const id = lastInsertId(); saveDb(); return id;
-  },
-  update(id, data) {
-    const allowed = ['note', 'color', 'page'];
+  async update(id, data) {
+    const allowed = ['note','color','page'];
     const fields = Object.keys(data).filter(k => allowed.includes(k));
     if (!fields.length) return;
-    const setClause = fields.map(f => `${f} = ?`).join(', ');
-    db.run(`UPDATE pdf_annotations SET ${setClause} WHERE id = ?`, [...fields.map(f => data[f]), id]);
-    saveDb();
+    const p = (i) => isPg ? `$${i}` : '?';
+    const set = fields.map((f, i) => `${f} = ${p(i+1)}`).join(', ');
+    await run(`UPDATE pdf_annotations SET ${set} WHERE id = ${p(fields.length+1)}`, [...fields.map(f => data[f]), id]);
   },
-  delete(id) {
-    db.run('DELETE FROM pdf_annotations WHERE id = ?', [id]);
-    saveDb();
-  },
+  async delete(id) { await run('DELETE FROM pdf_annotations WHERE id = ?', [id]); },
 };
 
 module.exports = {
-  initDb, getDb,
+  initDb, getDb, isPg,
   characterQueries, skillQueries, weaponQueries,
   possessionQueries, diceQueries, configQueries, evidenceQueries,
   npcQueries, weaponCatalogQueries, sessionQueries,
-  sessionLogQueries, annotationQueries,
-  DEFAULT_CONFIG,
+  sessionLogQueries, annotationQueries, authQueries,
+  DEFAULT_CONFIG, DEFAULT_SKILLS,
 };
